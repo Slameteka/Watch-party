@@ -46,17 +46,20 @@ Aturan:
 - [Backend] Pembuatan `local_server.py` untuk pengetesan hands-on lokal tanpa ketergantungan cloud.
 - [Backend] Seluruh 26 unit test lulus (`uv run pytest`) dan lulus lint/format (`uv run ruff check` & `ruff format`).
 - [Backend] Pembuatan 4 modul Terraform backend (`infra/terraform/modules/{data,auth,api,realtime}`) dengan least-privilege IAM, rate limiting/throttling, CORS, secure access logs, dan validasi `terraform fmt` serta `terraform validate` lulus 100%.
+- [Backend] Pembuatan script packaging Lambda `backend/scripts/build_lambda.sh` untuk Python 3.14 arm64 (`aarch64-manylinux2014`) berbasis `uv export` dan `uv pip install`.
+- [Backend] Pembuatan GitHub Actions workflow `.github/workflows/backend-ci.yml` yang mencakup linting, testing, validasi Terraform, dan build packaging verification.
 
 **Keputusan + alasan**
 - Pemisahan clean architecture antara core domain/repository dengan Lambda handlers agar handlers tetap tipis dan mudah diuji secara modular.
 - Penambahan runner `local_server.py` berbasis mock DynamoDB (moto) agar tim bisa melakukan manual testing dan integrasi cepat tanpa harus menunggu deployment cloud.
 - Konfigurasi Lambda packaging di modul Terraform dengan data source dummy fallback agar modul dapat di-validate dan di-plan secara independen tanpa ketergantungan file zip build eksternal.
+- Penggunaan modul standar Python `zipfile` pada `build_lambda.sh` agar packaging tidak bergantung pada binary system utility `zip` dan dapat berjalan portabel di runner mana pun.
 
 **Blocker**
 - Menunggu penyiapan akun AWS dan bootstrap S3 backend / parameter SSM oleh role Platform sebelum deploy cloud.
 
 **Berikutnya**
-- [Backend] Integrasi CI GitHub Actions workflow untuk lint/test otomatis atau koordinasi integrasi dengan role Frontend dan Platform.
+- [Backend] Push branch `feat/backend-core-handlers` dan pembuatan Pull Request ke `main` setelah review tim, serta koordinasi integrasi API dengan Frontend.
 
 ---
 
