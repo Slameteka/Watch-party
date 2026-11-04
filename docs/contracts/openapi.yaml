@@ -1,0 +1,761 @@
+openapi: 3.1.0
+info:
+  title: Watch Party REST API
+  version: 1.0.0-rc
+  summary: Kontrak REST untuk Watch Party (nama kerja, difiksasi Senin 2 Nov 2026).
+  description: |
+    Kontrak REST API. Nama produk masih nama kerja; difiksasi Senin 2 Nov 2026.
+
+    Konvensi:
+    - Semua nama field JSON memakai **camelCase** (sama dengan kontrak WebSocket di `ws-messages.md`).
+    - Waktu ditulis sebagai epoch milidetik dengan sufiks `Ms` (contoh `createdAtMs`), durasi/posisi dalam detik dengan sufiks `Sec`.
+    - Error selalu berbentuk `{"error": {"code", "message", "details"}}`. Kode error sama dengan kontrak WebSocket.
+      `message` ditulis dalam bahasa Inggris untuk developer; teks untuk pengguna dipetakan frontend dari `code`.
+    - Angka batas (panjang teks, TTL, rate limit) mengacu ke `docs/architecture.md` bagian 3 (Angka Kunci).
+    - `x-feature-ids` menghubungkan operation ke ID fitur di PRD. `x-release` menunjukkan target rilis.
+
+    Autentikasi:
+    - `cognitoJwt`: access token Cognito milik host. Wajib untuk `POST /rooms`, opsional untuk `POST /rooms/{roomId}/join`.
+    - `roomToken`: JWT jangka pendek (TTL 4 jam) dari endpoint join/create/refresh. Dipakai untuk semua aksi di dalam room.
+    - Peran (`host`, `controller`, `viewer`) tidak disimpan di token; server membacanya dari database setiap request.
+  license:
+    name: Proprietary (tugas kuliah)
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: https://api.{appDomain}
+    description: Production. `appDomain` = `<project_name>.chescloud.my.id`.
+    variables:
+      appDomain:
+        default: watchparty.chescloud.my.id
+        description: Domain aplikasi, diturunkan dari variabel Terraform `project_name`.
+tags:
+  - name: system
+    description: Health check.
+  - name: catalog
+    description: Katalog film curated (F-5.1).
+  - name: rooms
+    description: Manajemen room dan sesi peserta (F-1.x).
+  - name: playback
+    description: Izin kontrol playback (F-2.2). Perintah play/pause/seek lewat WebSocket.
+  - name: media
+    description: Akses film HLS lewat CloudFront signed cookies (F-2.3).
+  - name: rtc
+    description: Token video chat LiveKit (F-3.x).
+paths:
+  /health:
+    get:
+      tags: [system]
+      operationId: getHealth
+      summary: Health check
+      description: Dipakai untuk smoke test setelah deploy. Tanpa autentikasi.
+      security: []
+      responses:
+        '200':
+          description: Service sehat.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /catalog:
+    get:
+      tags: [catalog]
+      operationId: listCatalog
+      summary: Daftar film di katalog
+      description: Publik (bisa dilihat tanpa login). Poster publik lewat `/posters/*`; film tetap butuh signed cookies.
+      x-feature-ids: [F-5.1]
+      x-release: v1.0
+      security: []
+      responses:
+        '200':
+          description: Daftar film, diurutkan berdasarkan `sortOrder`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /rooms:
+    post:
+      tags: [rooms]
+      operationId: createRoom
+      summary: Buat room baru (host)
+      description: |
+        Host yang sudah login membuat room dengan satu film dari katalog. Respons berisi data room dan sesi host
+        (termasuk `roomToken`), sehingga host tidak perlu memanggil `join` lagi.
+        State playback awal: `paused` di posisi 0, `version` 1.
+        Field `maxParticipants` opsional (2–10, termasuk host). Jika tidak dikirim, server memakai batas platform
+        (`ROOM_MAX_PARTICIPANTS`, default 10). Nilai di luar 2–10 atau di atas batas platform ditolak dengan `400 VALIDATION_ERROR`.
+        UI untuk memilih nilai ini adalah F-1.8 (Could, belum ada target rilis), tetapi server v1.0 sudah menerima dan menyimpan field ini.
+      x-feature-ids: [F-1.1, F-1.2, F-1.4]
+      x-release: v1.0
+      security:
+        - cognitoJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoomRequest'
+      responses:
+        '201':
+          description: Room dibuat.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateRoomResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /rooms/{roomId}:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+    get:
+      tags: [rooms]
+      operationId: getRoom
+      summary: Ringkasan room untuk halaman join
+      description: Tanpa autentikasi; siapa pun yang punya link boleh melihat ringkasan. Room yang sudah melewati masa hidup 24 jam dikembalikan dengan `status = closed`.
+      x-feature-ids: [F-1.3]
+      x-release: v1.0
+      security: []
+      responses:
+        '200':
+          description: Ringkasan room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Room'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /rooms/{roomId}/join:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+    post:
+      tags: [rooms]
+      operationId: joinRoom
+      summary: Join room dan dapatkan room token
+      description: |
+        Guest join tanpa login dan mendapat peran `viewer`.
+        Jika header `Authorization` berisi access token Cognito yang valid dan `sub`-nya adalah host room ini,
+        server mengembalikan sesi host dengan `participantId` host yang sama (host kembali dari tab baru).
+        Kapasitas: maksimal `maxParticipants` peserta terhubung per room (default 10), termasuk host. Satu tempat selalu dicadangkan untuk host,
+        jadi guest ditolak dengan `409 ROOM_FULL` jika sudah ada `maxParticipants − 1` guest terhubung. Endpoint ini hanya pre-check;
+        tempat baru dikunci saat WebSocket `$connect` (lihat `ws-messages.md` §1.1). Jika `$connect` ditolak karena
+        room penuh, `POST /rooms/{roomId}/session/refresh` mengembalikan `409 ROOM_FULL`.
+      x-feature-ids: [F-1.3, F-1.4]
+      x-release: v1.0
+      security:
+        - {}
+        - cognitoJwt: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JoinRoomRequest'
+      responses:
+        '200':
+          description: Berhasil join.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomSession'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/RoomFull'
+        '410':
+          $ref: '#/components/responses/RoomClosed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /rooms/{roomId}/session/refresh:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+    post:
+      tags: [rooms]
+      operationId: refreshRoomSession
+      summary: Perpanjang room token
+      description: |
+        Client memanggil endpoint ini saat sisa umur room token < 30 menit. Token lama harus masih valid. `participantId` dan peran tidak berubah.
+        Endpoint ini juga dipakai untuk mencari penyebab gagal connect WebSocket (`ws-messages.md` §5.3):
+        `403` jika peserta sudah di-kick, `409 ROOM_FULL` jika peserta adalah guest yang belum terhubung dan semua tempat guest (`maxParticipants − 1`) terisi (1 tempat dicadangkan untuk host),
+        `410` jika room ditutup/expired.
+      x-feature-ids: [F-2.5]
+      x-release: v1.0
+      security:
+        - roomToken: []
+      responses:
+        '200':
+          description: Room token baru.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomSession'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/RoomFull'
+        '410':
+          $ref: '#/components/responses/RoomClosed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /rooms/{roomId}/media-cookies:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+    post:
+      tags: [media]
+      operationId: issueMediaCookies
+      summary: Terbitkan CloudFront signed cookies untuk film room ini
+      description: |
+        Mengembalikan 3 header `Set-Cookie` (`CloudFront-Policy`, `CloudFront-Signature`, `CloudFront-Key-Pair-Id`) dengan
+        atribut `Domain=<appDomain>; Path=/media/; Secure; HttpOnly; SameSite=Lax`.
+        Policy hanya mengizinkan `https://<appDomain>/media/<mediaId>/*` selama 2 jam.
+        Client wajib memanggil dengan `credentials: "include"` dan meminta ulang setiap 90 menit.
+      x-feature-ids: [F-2.3]
+      x-release: v1.0
+      security:
+        - roomToken: []
+      responses:
+        '204':
+          description: Cookie diset.
+          headers:
+            Set-Cookie:
+              description: Tiga cookie CloudFront (satu header per cookie).
+              schema:
+                type: string
+              example: CloudFront-Policy=eyJTdGF0ZW1lbnQiOlt7...; Domain=watchparty.chescloud.my.id; Path=/media/; Secure; HttpOnly; SameSite=Lax
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '410':
+          $ref: '#/components/responses/RoomClosed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /rooms/{roomId}/rtc-token:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+    post:
+      tags: [rtc]
+      operationId: issueRtcToken
+      summary: Terbitkan access token LiveKit
+      description: |
+        Token LiveKit dengan `identity = participantId`, `room = roomId`, nama tampilan = `displayName`,
+        grant `roomJoin`, `canPublish`, `canSubscribe` (tanpa `canPublishData`). TTL 10 menit, hanya dipakai saat connect.
+        Grant ini sama untuk setiap peserta (semua peran), apa pun status kamera/mikrofonnya. Publish dan subscribe terpisah,
+        jadi peserta dengan kamera dan mikrofon mati tetap menerima video/audio peserta lain (AC-3.3.3).
+      x-feature-ids: [F-3.1, F-3.2, F-3.3]
+      x-release: v1.0
+      security:
+        - roomToken: []
+      responses:
+        '200':
+          description: Token LiveKit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RtcToken'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '410':
+          $ref: '#/components/responses/RoomClosed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /rooms/{roomId}/controllers/{participantId}:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+      - $ref: '#/components/parameters/ParticipantId'
+    put:
+      tags: [playback]
+      operationId: grantController
+      summary: Host memberi peran controller ke peserta
+      description: |
+        Hanya host. Idempotent: jika peserta sudah `controller`, respons tetap 200.
+        Host tidak bisa mengubah perannya sendiri. Server mengirim `participant.updated` lewat WebSocket ke semua peserta.
+      x-feature-ids: [F-2.2]
+      x-release: v1.0
+      security:
+        - roomToken: []
+      responses:
+        '200':
+          description: Peran peserta sekarang `controller`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Participant'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          $ref: '#/components/responses/RoomClosed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [playback]
+      operationId: revokeController
+      summary: Host mencabut peran controller
+      description: Hanya host. Idempotent; peserta kembali menjadi `viewer`. Server mengirim `participant.updated` lewat WebSocket.
+      x-feature-ids: [F-2.2]
+      x-release: v1.0
+      security:
+        - roomToken: []
+      responses:
+        '200':
+          description: Peran peserta sekarang `viewer`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Participant'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          $ref: '#/components/responses/RoomClosed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /rooms/{roomId}/participants/{participantId}:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+      - $ref: '#/components/parameters/ParticipantId'
+    delete:
+      tags: [rooms]
+      operationId: kickParticipant
+      summary: Host mengeluarkan peserta (v1.1)
+      description: |
+        Hanya host; host tidak bisa mengeluarkan dirinya sendiri. Server menandai peserta `kicked`, mengirim
+        `session.ended` (`reason = kicked`) ke peserta tersebut, `participant.left` (`reason = kicked`) ke peserta lain,
+        memutus koneksi WebSocket-nya, dan mengeluarkannya dari room LiveKit. Room token peserta tersebut tidak berlaku lagi.
+      x-feature-ids: [F-1.6]
+      x-release: v1.1
+      security:
+        - roomToken: []
+      responses:
+        '204':
+          description: Peserta dikeluarkan.
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          $ref: '#/components/responses/RoomClosed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /rooms/{roomId}/close:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+    post:
+      tags: [rooms]
+      operationId: closeRoom
+      summary: Host menutup room (v1.1)
+      description: |
+        Hanya host. Idempotent: menutup room yang sudah `closed` tetap 200. Server mengirim `session.ended`
+        (`reason = roomClosed`) ke semua peserta, memutus semua koneksi, dan menjadwalkan penghapusan data 24 jam kemudian.
+      x-feature-ids: [F-1.7]
+      x-release: v1.1
+      security:
+        - roomToken: []
+      responses:
+        '200':
+          description: Room sudah ditutup.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Room'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  securitySchemes:
+    cognitoJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token dari Amazon Cognito user pool (login host lewat managed login, authorization code + PKCE).
+    roomToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Room token dari backend (HS256, TTL 4 jam). Claim: `iss`, `aud` = `room`, `sub` = `participantId`, `roomId`, `iat`, `exp`, `jti`.
+        Token yang `roomId`-nya tidak sama dengan path ditolak dengan 403.
+  parameters:
+    RoomId:
+      name: roomId
+      in: path
+      required: true
+      description: ID room, 12 karakter acak base62.
+      schema:
+        $ref: '#/components/schemas/RoomId'
+    ParticipantId:
+      name: participantId
+      in: path
+      required: true
+      description: ID peserta di dalam room.
+      schema:
+        $ref: '#/components/schemas/ParticipantId'
+  responses:
+    ValidationError:
+      description: Input tidak valid (`VALIDATION_ERROR`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: displayName must be 1-32 characters.
+              details:
+                field: displayName
+    Unauthorized:
+      description: Token tidak ada, tidak valid, atau expired (`UNAUTHORIZED`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Token valid tetapi tidak berhak (misalnya bukan host, peserta sudah di-kick, atau roomId tidak cocok) (`FORBIDDEN`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Room, peserta, atau film tidak ditemukan (`NOT_FOUND`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RoomFull:
+      description: Semua tempat guest (`maxParticipants − 1`) terisi; 1 tempat dicadangkan untuk host, walaupun host sedang offline (`ROOM_FULL`). Hanya guest yang bisa menerima error ini.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: ROOM_FULL
+              message: All guest seats (maxParticipants - 1) are taken; 1 seat is reserved for the host.
+    RoomClosed:
+      description: Room sudah ditutup atau expired (`ROOM_CLOSED`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Terlalu banyak request (`RATE_LIMITED`).
+      headers:
+        Retry-After:
+          description: Detik sebelum boleh mencoba lagi.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Error tidak terduga di server (`INTERNAL_ERROR`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    RoomId:
+      type: string
+      pattern: '^[A-Za-z0-9]{12}$'
+      examples: [aZ3kP9qL2mXw]
+    ParticipantId:
+      type: string
+      pattern: '^p_[A-Za-z0-9]{16}$'
+      examples: [p_Q8w2Ez7Rt5Yu1Io3]
+    MediaId:
+      type: string
+      pattern: '^[a-z0-9-]{1,64}$'
+      examples: [sintel]
+    Role:
+      type: string
+      enum: [host, controller, viewer]
+      description: Peran peserta di room. Default guest `viewer`.
+    PlayerStatus:
+      type: string
+      enum: [unknown, buffering, syncing, ready]
+      description: Status player yang dilaporkan client (F-2.4). `unknown` sebelum laporan pertama.
+    DisplayName:
+      type: string
+      minLength: 1
+      maxLength: 32
+      description: Display name setelah trim, tanpa control character.
+      examples: [Bella]
+    ErrorCode:
+      type: string
+      description: Kode error bersama untuk REST dan WebSocket.
+      enum:
+        - VALIDATION_ERROR
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - NOT_FOUND
+        - ROOM_FULL
+        - ROOM_CLOSED
+        - VERSION_CONFLICT
+        - RATE_LIMITED
+        - PAYLOAD_TOO_LARGE
+        - UNSUPPORTED_VERSION
+        - INTERNAL_ERROR
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              $ref: '#/components/schemas/ErrorCode'
+            message:
+              type: string
+              description: Pesan untuk developer (bukan untuk ditampilkan apa adanya ke pengguna).
+            details:
+              type: object
+              description: Info tambahan opsional, misalnya field yang tidak valid.
+              additionalProperties: true
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+    Media:
+      type: object
+      additionalProperties: false
+      required: [mediaId, title, durationSec, posterUrl, playbackUrl, license, attribution]
+      properties:
+        mediaId:
+          $ref: '#/components/schemas/MediaId'
+        title:
+          type: string
+          examples: [Sintel]
+        description:
+          type: string
+        durationSec:
+          type: number
+          minimum: 0
+          examples: [888]
+        posterUrl:
+          type: string
+          format: uri
+          description: URL publik poster di `/posters/*`.
+          examples: ['https://watchparty.chescloud.my.id/posters/sintel.jpg']
+        playbackUrl:
+          type: string
+          format: uri
+          description: URL master playlist HLS di `/media/*` (butuh signed cookies).
+          examples: ['https://watchparty.chescloud.my.id/media/sintel/master.m3u8']
+        license:
+          type: string
+          examples: [CC BY 3.0]
+        attribution:
+          type: string
+          examples: ['(c) copyright Blender Foundation | durian.blender.org']
+    CatalogResponse:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Media'
+    RoomStatus:
+      type: string
+      enum: [open, closed]
+    MaxParticipants:
+      type: integer
+      minimum: 2
+      maximum: 10
+      description: |
+        Batas peserta terhubung per room, termasuk host. Ditentukan saat room dibuat dan tidak berubah.
+        Default = batas platform (`ROOM_MAX_PARTICIPANTS`, default 10; 10 juga nilai maksimum di v1).
+        Guest terhubung maksimal `maxParticipants − 1`, karena 1 tempat selalu dicadangkan untuk host.
+      examples: [10]
+    Room:
+      type: object
+      additionalProperties: false
+      required: [roomId, mediaId, mediaTitle, status, hostDisplayName, participantCount, maxParticipants, createdAtMs, expiresAtMs, inviteUrl]
+      properties:
+        roomId:
+          $ref: '#/components/schemas/RoomId'
+        mediaId:
+          $ref: '#/components/schemas/MediaId'
+        mediaTitle:
+          type: string
+        status:
+          $ref: '#/components/schemas/RoomStatus'
+        hostDisplayName:
+          $ref: '#/components/schemas/DisplayName'
+        participantCount:
+          type: integer
+          minimum: 0
+          description: |
+            Jumlah peserta yang sedang terhubung (host + guest). Hanya untuk informasi.
+            Client tidak boleh menyimpulkan room penuh dari `participantCount` dan `maxParticipants`:
+            jika host sedang offline, guest sudah ditolak saat `participantCount` = `maxParticipants − 1`. UI menampilkan
+            "Room penuh" hanya saat menerima error `ROOM_FULL`.
+        maxParticipants:
+          $ref: '#/components/schemas/MaxParticipants'
+        createdAtMs:
+          type: integer
+        expiresAtMs:
+          type: integer
+          description: Akhir masa hidup room (createdAtMs + 24 jam).
+        closedAtMs:
+          type: integer
+          description: Diisi jika room ditutup manual oleh host.
+        inviteUrl:
+          type: string
+          format: uri
+          examples: ['https://watchparty.chescloud.my.id/r/aZ3kP9qL2mXw']
+    RoomSession:
+      type: object
+      additionalProperties: false
+      required: [roomId, participantId, displayName, role, roomToken, roomTokenExpiresAtMs, wsUrl]
+      properties:
+        roomId:
+          $ref: '#/components/schemas/RoomId'
+        participantId:
+          $ref: '#/components/schemas/ParticipantId'
+        displayName:
+          $ref: '#/components/schemas/DisplayName'
+        role:
+          $ref: '#/components/schemas/Role'
+        roomToken:
+          type: string
+          description: JWT room token (TTL 4 jam).
+        roomTokenExpiresAtMs:
+          type: integer
+        wsUrl:
+          type: string
+          format: uri
+          description: URL WebSocket API. Client menambahkan `?token=<roomToken>` saat connect.
+          examples: ['wss://ws.watchparty.chescloud.my.id']
+    Participant:
+      type: object
+      additionalProperties: false
+      required: [participantId, displayName, role, playerStatus, connected, joinedAtMs]
+      properties:
+        participantId:
+          $ref: '#/components/schemas/ParticipantId'
+        displayName:
+          $ref: '#/components/schemas/DisplayName'
+        role:
+          $ref: '#/components/schemas/Role'
+        playerStatus:
+          $ref: '#/components/schemas/PlayerStatus'
+        connected:
+          type: boolean
+          description: |
+            Status koneksi WebSocket peserta. UI menampilkan guest hanya jika `connected = true`.
+            Host selalu ditampilkan; jika `connected = false`, host ditandai offline (PRD BR-7).
+        joinedAtMs:
+          type: integer
+    CreateRoomRequest:
+      type: object
+      additionalProperties: false
+      required: [mediaId, displayName]
+      properties:
+        mediaId:
+          $ref: '#/components/schemas/MediaId'
+        displayName:
+          $ref: '#/components/schemas/DisplayName'
+        maxParticipants:
+          allOf:
+            - $ref: '#/components/schemas/MaxParticipants'
+          default: 10
+          description: Opsional (F-1.8, Could). Jika tidak dikirim, server memakai batas platform (default 10).
+    CreateRoomResponse:
+      type: object
+      additionalProperties: false
+      required: [room, session]
+      properties:
+        room:
+          $ref: '#/components/schemas/Room'
+        session:
+          $ref: '#/components/schemas/RoomSession'
+    JoinRoomRequest:
+      type: object
+      additionalProperties: false
+      required: [displayName]
+      properties:
+        displayName:
+          $ref: '#/components/schemas/DisplayName'
+    RtcToken:
+      type: object
+      additionalProperties: false
+      required: [token, url, expiresAtMs]
+      properties:
+        token:
+          type: string
+          description: Access token LiveKit (JWT), TTL 10 menit.
+        url:
+          type: string
+          format: uri
+          examples: ['wss://rtc.watchparty.chescloud.my.id']
+        expiresAtMs:
+          type: integer

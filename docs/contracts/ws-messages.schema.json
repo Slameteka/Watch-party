@@ -1,0 +1,649 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Kontrak Pesan WebSocket - Protokol v1",
+  "description": "Salinan mesin dari ws-messages.md (v1 draft). Jika berbeda, ws-messages.md yang benar dan skema ini diperbaiki di PR yang sama. Skema ini ketat (additionalProperties false) untuk memvalidasi pesan versi kontrak ini; client tetap wajib mengabaikan field dan type baru dari server (ws-messages.md §2, §8). Batas ukuran pesan (client -> server <= 4 KB, server -> client <= 64 KB, architecture.md §3.2) tidak bisa dinyatakan di JSON Schema dan dicek di kode.",
+  "oneOf": [
+    { "$ref": "#/$defs/clientMessage" },
+    { "$ref": "#/$defs/serverMessage" }
+  ],
+  "$defs": {
+    "clientMessage": {
+      "description": "Pesan client -> server (ws-messages.md §3).",
+      "oneOf": [
+        { "$ref": "#/$defs/msg.session.resume" },
+        { "$ref": "#/$defs/msg.clock.ping" },
+        { "$ref": "#/$defs/msg.heartbeat" },
+        { "$ref": "#/$defs/msg.playback.command" },
+        { "$ref": "#/$defs/msg.player.status" },
+        { "$ref": "#/$defs/msg.chat.send" },
+        { "$ref": "#/$defs/msg.reaction.send" },
+        { "$ref": "#/$defs/msg.metrics.report" }
+      ]
+    },
+    "serverMessage": {
+      "description": "Pesan server -> client (ws-messages.md §4).",
+      "oneOf": [
+        { "$ref": "#/$defs/msg.room.snapshot" },
+        { "$ref": "#/$defs/msg.playback.state" },
+        { "$ref": "#/$defs/msg.clock.pong" },
+        { "$ref": "#/$defs/msg.participant.joined" },
+        { "$ref": "#/$defs/msg.participant.updated" },
+        { "$ref": "#/$defs/msg.participant.left" },
+        { "$ref": "#/$defs/msg.chat.message" },
+        { "$ref": "#/$defs/msg.reaction.added" },
+        { "$ref": "#/$defs/msg.session.ended" },
+        { "$ref": "#/$defs/msg.error" }
+      ]
+    },
+
+    "v": {
+      "description": "Versi protokol (major). Saat ini 1.",
+      "type": "integer",
+      "const": 1
+    },
+    "requestId": {
+      "description": "Dibuat client (disarankan UUID v4). Server meng-echo nilai ini di balasan, broadcast yang disebabkan pesan tersebut, dan error.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "sentAtMs": {
+      "description": "Epoch ms menurut jam pengirim. Untuk pesan server = waktu server.",
+      "type": "integer"
+    },
+    "epochMs": {
+      "type": "integer"
+    },
+
+    "RoomId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9]{12}$"
+    },
+    "ParticipantId": {
+      "type": "string",
+      "pattern": "^p_[A-Za-z0-9]{16}$"
+    },
+    "MediaId": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{1,64}$"
+    },
+    "Role": {
+      "type": "string",
+      "enum": ["host", "controller", "viewer"]
+    },
+    "PlayerStatus": {
+      "description": "Status player yang dilaporkan client. `unknown` sebelum laporan pertama.",
+      "type": "string",
+      "enum": ["unknown", "buffering", "syncing", "ready"]
+    },
+    "DisplayName": {
+      "description": "Display name setelah trim, tanpa control character.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "Emoji": {
+      "type": "string",
+      "enum": ["thumbsUp", "heart", "laugh", "wow", "sad"]
+    },
+    "PlaybackAction": {
+      "type": "string",
+      "enum": ["play", "pause", "seek"]
+    },
+    "MaxParticipants": {
+      "description": "Batas peserta terhubung per room, termasuk host. Default dan maksimum v1 = 10 (batas platform). Guest maks maxParticipants - 1.",
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 10
+    },
+
+    "Room": {
+      "$comment": "Harus sama persis dengan components.schemas.Room di openapi.yaml.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roomId", "mediaId", "mediaTitle", "status", "hostDisplayName", "participantCount", "maxParticipants", "createdAtMs", "expiresAtMs", "inviteUrl"],
+      "properties": {
+        "roomId": { "$ref": "#/$defs/RoomId" },
+        "mediaId": { "$ref": "#/$defs/MediaId" },
+        "mediaTitle": { "type": "string" },
+        "status": { "type": "string", "enum": ["open", "closed"] },
+        "hostDisplayName": { "$ref": "#/$defs/DisplayName" },
+        "participantCount": { "type": "integer", "minimum": 0 },
+        "maxParticipants": { "$ref": "#/$defs/MaxParticipants" },
+        "createdAtMs": { "$ref": "#/$defs/epochMs" },
+        "expiresAtMs": { "$ref": "#/$defs/epochMs" },
+        "closedAtMs": { "$ref": "#/$defs/epochMs" },
+        "inviteUrl": { "type": "string", "format": "uri" }
+      }
+    },
+    "Media": {
+      "$comment": "Harus sama persis dengan components.schemas.Media di openapi.yaml.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mediaId", "title", "durationSec", "posterUrl", "playbackUrl", "license", "attribution"],
+      "properties": {
+        "mediaId": { "$ref": "#/$defs/MediaId" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "durationSec": { "type": "number", "minimum": 0 },
+        "posterUrl": { "type": "string", "format": "uri" },
+        "playbackUrl": { "type": "string", "format": "uri" },
+        "license": { "type": "string" },
+        "attribution": { "type": "string" }
+      }
+    },
+    "Participant": {
+      "$comment": "Harus sama persis dengan components.schemas.Participant di openapi.yaml.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["participantId", "displayName", "role", "playerStatus", "connected", "joinedAtMs"],
+      "properties": {
+        "participantId": { "$ref": "#/$defs/ParticipantId" },
+        "displayName": { "$ref": "#/$defs/DisplayName" },
+        "role": { "$ref": "#/$defs/Role" },
+        "playerStatus": { "$ref": "#/$defs/PlayerStatus" },
+        "connected": {
+          "description": "Guest ditampilkan hanya jika true. Host selalu ditampilkan; false = offline (PRD BR-7).",
+          "type": "boolean"
+        },
+        "joinedAtMs": { "$ref": "#/$defs/epochMs" }
+      }
+    },
+    "PlaybackState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roomId", "mediaId", "status", "positionSec", "playbackRate", "updatedAtServerMs", "version"],
+      "properties": {
+        "roomId": { "$ref": "#/$defs/RoomId" },
+        "mediaId": { "$ref": "#/$defs/MediaId" },
+        "status": { "type": "string", "enum": ["playing", "paused"] },
+        "positionSec": { "description": "Posisi saat updatedAtServerMs.", "type": "number", "minimum": 0 },
+        "playbackRate": { "description": "v1 selalu 1.0.", "type": "number", "const": 1 },
+        "updatedAtServerMs": { "$ref": "#/$defs/epochMs" },
+        "version": { "description": "Naik 1 setiap perubahan. Room baru mulai dari 1.", "type": "integer", "minimum": 1 }
+      }
+    },
+    "ChatMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["messageId", "participantId", "displayName", "text", "createdAtMs"],
+      "properties": {
+        "messageId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "participantId": { "$ref": "#/$defs/ParticipantId" },
+        "displayName": { "$ref": "#/$defs/DisplayName" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "createdAtMs": { "$ref": "#/$defs/epochMs" }
+      }
+    },
+
+    "msg.session.resume": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "session.resume" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "lastVersion": { "description": "Versi state playback terakhir yang diterapkan client.", "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "msg.clock.ping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "clock.ping" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["clientSendMs"],
+          "properties": {
+            "clientSendMs": { "$ref": "#/$defs/epochMs" }
+          }
+        }
+      }
+    },
+    "msg.heartbeat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "heartbeat" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "msg.playback.command": {
+      "description": "Hanya peran host dan controller (cek peran di server, bukan di skema).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "requestId", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "playback.command" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "positionSec", "baseVersion"],
+          "properties": {
+            "action": { "$ref": "#/$defs/PlaybackAction" },
+            "positionSec": { "description": "play/pause = posisi lokal pengirim; seek = posisi tujuan. Lebih dari durasi film -> VALIDATION_ERROR (dicek di server).", "type": "number", "minimum": 0 },
+            "baseVersion": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "msg.player.status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "player.status" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {
+            "status": { "type": "string", "enum": ["buffering", "syncing", "ready"] }
+          }
+        }
+      }
+    },
+    "msg.chat.send": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "requestId", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "chat.send" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["text"],
+          "properties": {
+            "text": { "type": "string", "minLength": 1, "maxLength": 500 }
+          }
+        }
+      }
+    },
+    "msg.reaction.send": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "reaction.send" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["emoji"],
+          "properties": {
+            "emoji": { "$ref": "#/$defs/Emoji" }
+          }
+        }
+      }
+    },
+    "msg.metrics.report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "metrics.report" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["windowSec", "driftMs"],
+          "properties": {
+            "windowSec": { "type": "integer", "minimum": 1, "maximum": 60 },
+            "driftMs": {
+              "description": "1 sampel per detik. Kosong saat paused.",
+              "type": "array",
+              "maxItems": 60,
+              "items": { "type": "number", "minimum": 0 }
+            },
+            "commandLatencyMs": {
+              "type": "array",
+              "maxItems": 20,
+              "items": { "type": "number" }
+            },
+            "joinToFirstFrameMs": { "type": "number", "minimum": 0 },
+            "rttMs": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    },
+
+    "msg.room.snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "room.snapshot" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["room", "media", "playback", "participants", "recentChat", "self"],
+          "properties": {
+            "room": { "$ref": "#/$defs/Room" },
+            "media": { "$ref": "#/$defs/Media" },
+            "playback": { "$ref": "#/$defs/PlaybackState" },
+            "participants": {
+              "description": "Peserta yang tidak di-kick (termasuk yang connected = false).",
+              "type": "array",
+              "items": { "$ref": "#/$defs/Participant" }
+            },
+            "recentChat": {
+              "description": "Urut dari terlama ke terbaru.",
+              "type": "array",
+              "maxItems": 20,
+              "items": { "$ref": "#/$defs/ChatMessage" }
+            },
+            "self": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["participantId", "role"],
+              "properties": {
+                "participantId": { "$ref": "#/$defs/ParticipantId" },
+                "role": { "$ref": "#/$defs/Role" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "msg.playback.state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "playback.state" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "action", "causedBy"],
+          "properties": {
+            "state": { "$ref": "#/$defs/PlaybackState" },
+            "action": { "$ref": "#/$defs/PlaybackAction" },
+            "causedBy": { "$ref": "#/$defs/ParticipantId" }
+          }
+        }
+      }
+    },
+    "msg.clock.pong": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "clock.pong" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["clientSendMs", "serverTimeMs"],
+          "properties": {
+            "clientSendMs": { "$ref": "#/$defs/epochMs" },
+            "serverTimeMs": { "$ref": "#/$defs/epochMs" }
+          }
+        }
+      }
+    },
+    "msg.participant.joined": {
+      "description": "Guest mulai terhubung (ws-messages.md §4.6).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "participant.joined" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["participant"],
+          "properties": {
+            "participant": { "$ref": "#/$defs/Participant" }
+          }
+        }
+      }
+    },
+    "msg.participant.updated": {
+      "description": "Perubahan peran, playerStatus, atau connected milik host (ws-messages.md §4.6).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "participant.updated" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["participant"],
+          "properties": {
+            "participant": { "$ref": "#/$defs/Participant" }
+          }
+        }
+      }
+    },
+    "msg.participant.left": {
+      "description": "Guest saja (ws-messages.md §4.6).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "participant.left" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["participantId", "reason"],
+          "properties": {
+            "participantId": { "$ref": "#/$defs/ParticipantId" },
+            "reason": { "type": "string", "enum": ["disconnected", "kicked"] }
+          }
+        }
+      }
+    },
+    "msg.chat.message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "chat.message" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["message"],
+          "properties": {
+            "message": { "$ref": "#/$defs/ChatMessage" }
+          }
+        }
+      }
+    },
+    "msg.reaction.added": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "reaction.added" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["participantId", "emoji"],
+          "properties": {
+            "participantId": { "$ref": "#/$defs/ParticipantId" },
+            "emoji": { "$ref": "#/$defs/Emoji" }
+          }
+        }
+      }
+    },
+    "msg.session.ended": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "session.ended" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reason"],
+          "properties": {
+            "reason": { "type": "string", "enum": ["kicked", "roomClosed", "expired", "replaced"] }
+          }
+        }
+      }
+    },
+    "msg.error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "type", "sentAtMs", "payload"],
+      "properties": {
+        "v": { "$ref": "#/$defs/v" },
+        "type": { "const": "error" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sentAtMs": { "$ref": "#/$defs/sentAtMs" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message"],
+          "properties": {
+            "code": {
+              "description": "Kode error yang dipakai di WebSocket (kolom 'Dipakai di' = WS di ws-messages.md §6). Daftar lengkap bersama REST ada di openapi.yaml ErrorCode.",
+              "type": "string",
+              "enum": ["VALIDATION_ERROR", "FORBIDDEN", "ROOM_CLOSED", "VERSION_CONFLICT", "RATE_LIMITED", "PAYLOAD_TOO_LARGE", "UNSUPPORTED_VERSION", "INTERNAL_ERROR"]
+            },
+            "message": {
+              "description": "Bahasa Inggris, untuk developer. Teks UI dipetakan frontend dari code.",
+              "type": "string",
+              "minLength": 1
+            },
+            "details": { "type": "object" }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "code": { "const": "VALIDATION_ERROR" } } },
+              "then": {
+                "properties": {
+                  "details": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["field"],
+                    "properties": { "field": { "type": "string", "minLength": 1 } }
+                  }
+                }
+              }
+            },
+            {
+              "if": { "properties": { "code": { "const": "FORBIDDEN" } } },
+              "then": {
+                "properties": {
+                  "details": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["requiredRole"],
+                    "properties": { "requiredRole": { "$ref": "#/$defs/Role" } }
+                  }
+                }
+              }
+            },
+            {
+              "if": { "properties": { "code": { "const": "VERSION_CONFLICT" } } },
+              "then": {
+                "required": ["details"],
+                "properties": {
+                  "details": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["currentState"],
+                    "properties": { "currentState": { "$ref": "#/$defs/PlaybackState" } }
+                  }
+                }
+              }
+            },
+            {
+              "if": { "properties": { "code": { "const": "RATE_LIMITED" } } },
+              "then": {
+                "properties": {
+                  "details": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["retryAfterSec"],
+                    "properties": { "retryAfterSec": { "type": "integer", "minimum": 1 } }
+                  }
+                }
+              }
+            },
+            {
+              "if": { "properties": { "code": { "const": "UNSUPPORTED_VERSION" } } },
+              "then": {
+                "properties": {
+                  "details": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["supported"],
+                    "properties": {
+                      "supported": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 1 } }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": { "properties": { "code": { "enum": ["ROOM_CLOSED", "PAYLOAD_TOO_LARGE", "INTERNAL_ERROR"] } } },
+              "then": { "not": { "required": ["details"] } }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
