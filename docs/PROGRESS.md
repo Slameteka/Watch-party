@@ -33,6 +33,31 @@ Aturan:
 
 ---
 
+## 2026-11-04 (Rabu)
+
+**Selesai**
+- [Backend] Setup repository GitHub dan push initial commit ke `https://github.com/Slameteka/Watch-party` (branch `main`).
+- [Backend] Setup environment backend dengan `uv`, Python 3.14, Pydantic v2, `ruff`, dan `pytest`.
+- [Backend] Implementasi core models (`common`, `room`, `rest`, `websocket`) dengan validasi `extra="forbid"` dan format JSON `camelCase` sesuai kontrak.
+- [Backend] Implementasi auth token JWT HS256 (`roomToken`, TTL 4 jam).
+- [Backend] Implementasi DynamoDB repository layer (`room_repo`, `playback_repo` dengan optimistic concurrency versioning, `connection_repo` dengan penguncian kapasitas kursi).
+- [Backend] Implementasi REST API Lambda handler (`handlers/rest_api/`) untuk katalog, buat room, join room, refresh session, signed cookies, dan RTC token.
+- [Backend] Implementasi WebSocket Lambda handlers (`ws_authorizer`, `ws_connect`, `ws_disconnect`, `ws_message`) dan broadcast helper dengan auto-prune koneksi 410 Gone.
+- [Backend] Pembuatan `local_server.py` untuk pengetesan hands-on lokal tanpa ketergantungan cloud.
+- [Backend] Seluruh 26 unit test lulus (`uv run pytest`) dan lulus lint/format (`uv run ruff check` & `ruff format`).
+
+**Keputusan + alasan**
+- Pemisahan clean architecture antara core domain/repository dengan Lambda handlers agar handlers tetap tipis dan mudah diuji secara modular.
+- Penambahan runner `local_server.py` berbasis mock DynamoDB (moto) agar tim bisa melakukan manual testing dan integrasi cepat tanpa harus menunggu deployment cloud.
+
+**Blocker**
+- Tidak ada blocker teknis backend saat ini.
+
+**Berikutnya**
+- [Backend] Implementasi modul Terraform backend (`infra/terraform/modules/{data,auth,api,realtime}`).
+
+---
+
 ## 2026-10-31 (Sabtu)
 
 **Selesai**
