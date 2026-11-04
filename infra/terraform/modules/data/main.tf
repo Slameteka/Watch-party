@@ -70,12 +70,20 @@ resource "aws_dynamodb_table" "connections" {
 
   global_secondary_index {
     name            = "byRoom"
-    hash_key        = "roomId"
-    range_key       = "connectionId"
     projection_type = "INCLUDE"
     non_key_attributes = [
       "participantId"
     ]
+
+    key_schema {
+      attribute_name = "roomId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "connectionId"
+      key_type       = "RANGE"
+    }
   }
 
   server_side_encryption {

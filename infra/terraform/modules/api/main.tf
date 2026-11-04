@@ -80,7 +80,21 @@ resource "aws_lambda_permission" "http_api" {
   source_arn    = "${aws_apigatewayv2_api.http.execution_arn}/*/*"
 }
 
-# Stage $default with Architecture-compliant throttling (Rate 20, Burst 40)
+# CloudWatch Log Group for HTTP API Access Logs (14-day retention per architecture §3.4)
+resource "aws_cloudwatch_log_group" "http_access_logs" {
+  name              = "/aws/apigateway/${var.project_name}-${var.env}-http-api-access-logs"
+  retention_in_days = 14
+
+  tags = merge(
+    var.tags,
+    {
+      Name  = "/aws/apigateway/${var.project_name}-${var.env}-http-api-access-logs"
+      Owner = "backend"
+    }
+  )
+}
+
+# Stage $default with Architecture-compliant throttling (Rate 20, Burst 40) and Access Logging
 resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.http.id
   name        = "$default"
@@ -89,6 +103,20 @@ resource "aws_apigatewayv2_stage" "default" {
   default_route_settings {
     throttling_rate_limit  = 20
     throttling_burst_limit = 40
+  }
+
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.http_access_logs.arn
+    format = jsonencode({
+      requestId      = "$context.requestId"
+      ip             = "$context.identity.sourceIp"
+      requestTime    = "$context.requestTime"
+      httpMethod     = "$context.httpMethod"
+      routeKey       = "$context.routeKey"
+      status         = "$context.status"
+      protocol       = "$context.protocol"
+      responseLength = "$context.responseLength"
+    })
   }
 
   tags = merge(

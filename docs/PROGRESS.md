@@ -48,6 +48,8 @@ Aturan:
 - [Backend] Pembuatan 4 modul Terraform backend (`infra/terraform/modules/{data,auth,api,realtime}`) dengan least-privilege IAM, rate limiting/throttling, CORS, secure access logs, dan validasi `terraform fmt` serta `terraform validate` lulus 100%.
 - [Backend] Pembuatan script packaging Lambda `backend/scripts/build_lambda.sh` untuk Python 3.14 arm64 (`aarch64-manylinux2014`) berbasis `uv export` dan `uv pip install`.
 - [Backend] Pembuatan GitHub Actions workflow `.github/workflows/backend-ci.yml` yang mencakup linting, testing, validasi Terraform, dan build packaging verification.
+- [Backend] Setup dan audit SAST lokal dengan SonarQube: Quality Gate PASSED, 0 Bugs, 0 Vulnerabilities, 0 Code Smells, 0 Security Hotspots, dan 0 duplikasi pada 4.320 baris kode.
+- [Backend] Refactoring exception `ws_authorizer` (`UnauthorizedError`) dan modernisasi blok GSI DynamoDB (`key_schema`) serta HTTP access logs untuk kebersihan kode 100%.
 
 **Keputusan + alasan**
 - Pemisahan clean architecture antara core domain/repository dengan Lambda handlers agar handlers tetap tipis dan mudah diuji secara modular.
