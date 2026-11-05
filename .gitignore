@@ -3,17 +3,20 @@ docs/.review/
 
 # Terraform
 .terraform/
+.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfvars
 !*.tfvars.example
 crash.log
+*.zip
 
 # Python
 __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
+build/
 
 # Node
 node_modules/
@@ -28,3 +31,6 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+
+# SonarQube
+.scannerwork/

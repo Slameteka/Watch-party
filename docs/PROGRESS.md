@@ -33,6 +33,59 @@ Aturan:
 
 ---
 
+## 2026-11-06 (Jumat)
+
+**Selesai**
+- [Backend] Pembuatan skrip simulasi multi-client ujung ke ujung (`backend/tests/simulate_party.py`) yang memverifikasi 10 langkah alur lengkap: katalog media, pembuatan room, join guest via REST, koneksi WebSocket & seat capacity locking, sinkronisasi pemutaran video berbasis versi, penanganan tabrakan versi (optimistic concurrency conflict / `VERSION_CONFLICT`), promosi peran Host ke Controller, obrolan realtime, verifikasi snapshot ruangan (AP-6), dan kepatuhan aturan presensi Host saat offline (PRD BR-7).
+- [Backend] Penanganan bug `ExpressionAttributeNames` pada `PlaybackRepository.update_playback_state` saat aksi `SEEK` dan refactoring nested conditional expression untuk kebersihan kode.
+- [Backend] Seluruh suite pengujian diverifikasi lulus 100%: 26 unit test (`uv run pytest`), simulasi multi-client (`tests/simulate_party.py`), linter & formatter (`ruff check` & `ruff format`), serta 4 modul Terraform (`data`, `auth`, `api`, `realtime`).
+- [Backend] Verifikasi audit SonarQube dengan hasil 0 Bugs, 0 Vulnerabilities, 0 Code Smells, dan 0 Security Hotspots.
+- [Backend] Penyusunan dokumentasi panduan integrasi dan handoff Frontend komprehensif pada `backend/README.md` mencakup katalog REST API, WebSocket protocol, model optimistic concurrency, dan cara menjalankan local development mock server.
+
+**Keputusan + alasan**
+- Penulisan skrip simulasi `simulate_party.py` menggunakan in-memory Moto DynamoDB agar tim dapat menguji alur multi-client secara deterministik, cepat, dan terisolasi tanpa memerlukan kredensial AWS sungguhan.
+- Pendokumentasian lengkap kontrak payload REST dan event WebSocket langsung di `backend/README.md` untuk mempercepat proses handoff dan integrasi bagi Frontend engineer.
+
+**Blocker**
+- Tidak ada blocker pada sisi backend. Seluruh komponen backend, modul Terraform, skrip packaging, CI workflow, dan dokumentasi handoff telah siap.
+
+**Berikutnya**
+- [Frontend / Integrasi] Handoff ke tim Frontend untuk integrasi antarmuka pengguna dengan local server backend dan pengujian live sync.
+
+---
+
+## 2026-11-04 (Rabu)
+
+**Selesai**
+- [Backend] Setup repository GitHub dan push initial commit ke `https://github.com/Slameteka/Watch-party` (branch `main`).
+- [Backend] Setup environment backend dengan `uv`, Python 3.14, Pydantic v2, `ruff`, dan `pytest`.
+- [Backend] Implementasi core models (`common`, `room`, `rest`, `websocket`) dengan validasi `extra="forbid"` dan format JSON `camelCase` sesuai kontrak.
+- [Backend] Implementasi auth token JWT HS256 (`roomToken`, TTL 4 jam).
+- [Backend] Implementasi DynamoDB repository layer (`room_repo`, `playback_repo` dengan optimistic concurrency versioning, `connection_repo` dengan penguncian kapasitas kursi).
+- [Backend] Implementasi REST API Lambda handler (`handlers/rest_api/`) untuk katalog, buat room, join room, refresh session, signed cookies, dan RTC token.
+- [Backend] Implementasi WebSocket Lambda handlers (`ws_authorizer`, `ws_connect`, `ws_disconnect`, `ws_message`) dan broadcast helper dengan auto-prune koneksi 410 Gone.
+- [Backend] Pembuatan `local_server.py` untuk pengetesan hands-on lokal tanpa ketergantungan cloud.
+- [Backend] Seluruh 26 unit test lulus (`uv run pytest`) dan lulus lint/format (`uv run ruff check` & `ruff format`).
+- [Backend] Pembuatan 4 modul Terraform backend (`infra/terraform/modules/{data,auth,api,realtime}`) dengan least-privilege IAM, rate limiting/throttling, CORS, secure access logs, dan validasi `terraform fmt` serta `terraform validate` lulus 100%.
+- [Backend] Pembuatan script packaging Lambda `backend/scripts/build_lambda.sh` untuk Python 3.14 arm64 (`aarch64-manylinux2014`) berbasis `uv export` dan `uv pip install`.
+- [Backend] Pembuatan GitHub Actions workflow `.github/workflows/backend-ci.yml` yang mencakup linting, testing, validasi Terraform, dan build packaging verification.
+- [Backend] Setup dan audit SAST lokal dengan SonarQube: Quality Gate PASSED, 0 Bugs, 0 Vulnerabilities, 0 Code Smells, 0 Security Hotspots, dan 0 duplikasi pada 4.320 baris kode.
+- [Backend] Refactoring exception `ws_authorizer` (`UnauthorizedError`) dan modernisasi blok GSI DynamoDB (`key_schema`) serta HTTP access logs untuk kebersihan kode 100%.
+
+**Keputusan + alasan**
+- Pemisahan clean architecture antara core domain/repository dengan Lambda handlers agar handlers tetap tipis dan mudah diuji secara modular.
+- Penambahan runner `local_server.py` berbasis mock DynamoDB (moto) agar tim bisa melakukan manual testing dan integrasi cepat tanpa harus menunggu deployment cloud.
+- Konfigurasi Lambda packaging di modul Terraform dengan data source dummy fallback agar modul dapat di-validate dan di-plan secara independen tanpa ketergantungan file zip build eksternal.
+- Penggunaan modul standar Python `zipfile` pada `build_lambda.sh` agar packaging tidak bergantung pada binary system utility `zip` dan dapat berjalan portabel di runner mana pun.
+
+**Blocker**
+- Menunggu penyiapan akun AWS dan bootstrap S3 backend / parameter SSM oleh role Platform sebelum deploy cloud.
+
+**Berikutnya**
+- [Backend] Push branch `feat/backend-core-handlers` dan pembuatan Pull Request ke `main` setelah review tim, serta koordinasi integrasi API dengan Frontend.
+
+---
+
 ## 2026-10-31 (Sabtu)
 
 **Selesai**

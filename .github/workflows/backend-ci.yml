@@ -1,0 +1,118 @@
+name: Backend CI
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+    paths:
+      - "backend/**"
+      - "infra/terraform/modules/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - "infra/terraform/modules/**"
+      - ".github/workflows/backend-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python-quality:
+    name: Python Lint & Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.14
+        run: uv python install 3.14
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Check formatting (ruff format)
+        run: uv run ruff format --check
+
+      - name: Lint code (ruff check)
+        run: uv run ruff check
+
+      - name: Run unit tests (pytest)
+        run: uv run pytest -v
+
+  terraform-quality:
+    name: Terraform Format & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: "1.17.1"
+
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive infra/
+
+      - name: Validate Module data
+        run: |
+          terraform -chdir=infra/terraform/modules/data init -backend=false
+          terraform -chdir=infra/terraform/modules/data validate
+
+      - name: Validate Module auth
+        run: |
+          terraform -chdir=infra/terraform/modules/auth init -backend=false
+          terraform -chdir=infra/terraform/modules/auth validate
+
+      - name: Validate Module api
+        run: |
+          terraform -chdir=infra/terraform/modules/api init -backend=false
+          terraform -chdir=infra/terraform/modules/api validate
+
+      - name: Validate Module realtime
+        run: |
+          terraform -chdir=infra/terraform/modules/realtime init -backend=false
+          terraform -chdir=infra/terraform/modules/realtime validate
+
+  lambda-build:
+    name: Lambda Packaging Verification
+    runs-on: ubuntu-latest
+    needs: [python-quality, terraform-quality]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.14
+        run: uv python install 3.14
+
+      - name: Run Lambda build script
+        run: ./backend/scripts/build_lambda.sh
+
+      - name: Verify generated zip archives
+        run: |
+          test -f backend/dist/backend.zip
+          test -f backend/dist/rest-api.zip
+          test -f backend/dist/realtime.zip
+          echo "All Lambda zip packages built and verified successfully!"
