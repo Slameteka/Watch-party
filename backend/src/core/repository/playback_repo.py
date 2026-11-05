@@ -50,13 +50,11 @@ class PlaybackRepository:
             VersionConflictError: If version does not match base_version.
         """
         now_ms = current_epoch_ms()
-        new_status = (
-            "playing"
-            if action == PlaybackAction.PLAY
-            else "paused"
-            if action == PlaybackAction.PAUSE
-            else None
-        )
+        new_status: str | None = None
+        if action == PlaybackAction.PLAY:
+            new_status = "playing"
+        elif action == PlaybackAction.PAUSE:
+            new_status = "paused"
 
         update_expr_parts = [
             "positionSec = :new_pos",
@@ -78,15 +76,18 @@ class PlaybackRepository:
 
         update_expr = "SET " + ", ".join(update_expr_parts)
 
+        update_kwargs: dict[str, Any] = {
+            "Key": {"PK": f"ROOM#{room_id}", "SK": "PLAYBACK"},
+            "UpdateExpression": update_expr,
+            "ConditionExpression": "attribute_exists(version) AND version = :base_version",
+            "ExpressionAttributeValues": expr_values,
+            "ReturnValues": "ALL_NEW",
+        }
+        if expr_names:
+            update_kwargs["ExpressionAttributeNames"] = expr_names
+
         try:
-            response = self.table.update_item(
-                Key={"PK": f"ROOM#{room_id}", "SK": "PLAYBACK"},
-                UpdateExpression=update_expr,
-                ConditionExpression="attribute_exists(version) AND version = :base_version",
-                ExpressionAttributeValues=expr_values,
-                ExpressionAttributeNames=expr_names if expr_names else None,
-                ReturnValues="ALL_NEW",
-            )
+            response = self.table.update_item(**update_kwargs)
             return self._item_to_model(response["Attributes"], room_id)
         except ClientError as e:
             if is_conditional_check_failed(e):
