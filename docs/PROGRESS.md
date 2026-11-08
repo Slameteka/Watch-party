@@ -36,6 +36,15 @@ Aturan:
 ## 2026-11-06 (Jumat)
 
 **Selesai**
+- [FE-Social] Penyempurnaan fidelitas ikon dan layout 1:1 sesuai `Watch Party · Ruang film.png`: pembuatan komponen ikon kustom (`Icons.tsx`: Logo TV antena retro, Popcorn bergaris merah-putih, Bulan sabit emas, Gamepad, Radio broadcast gelombang konsentris, Equalizer suara animasi, Subtitel, PiP, Fullscreen sudut 4-arah), penataan layout grid horisontal kartu peserta 'Satu layar, enam cerita' (avatar sisi kiri dan status presensi di sisi kanan), serta pembungkusan badge rating '13+' pada metadata film.
+- [FE-Social] Penyempurnaan detail pixel-perfect antarmuka ruang film sesuai `Watch Party · Ruang film.png`: penyelarasan presisi layout 3-kolom (header top-bar terpadu 56px, dock vertikal popcorn/bulan/gamepad, penataan sub-menu Malam Minggu, video player dengan visual roadtrip senja & subtitel 2-baris & kontrol bar 1080p/PiP, 6 kartu peserta 'Satu layar, enam cerita' dengan avatar dan status presensi yang tepat, serta panel obrolan kanan dengan badge online, kartu sambutan, bubble chat tereaksi, dan indikator audio WebRTC 24ms).
+- [FE-Social] Rekreasi antarmuka ruang film berbasis desain `Watch Party · Ruang film.png`: layout 3-kolom (dock & sidebar navigasi kiri, pemutar film tengah dengan subtitel & reaksi melayang & 6 kartu cerita peserta, serta sidebar obrolan kanan dengan linimasa pesan, reaksi terlampir, dan status audio RTC terhubung).
+- [FE-Social] Inisialisasi scaffolding frontend berbasis React 19, Vite, TypeScript, Tailwind CSS, dan Zustand di direktori `frontend/`.
+- [FE-Social] Implementasi modul video chat LiveKit (`VideoGrid`, `VideoTile`, `MediaControls`) dengan layout adaptif hingga 10 tile, kepatuhan privasi (kamera/mic default mati saat join), indikator kualitas sinyal, dan penanganan graceful degradation saat LiveKit down.
+- [FE-Social] Implementasi obrolan teks real-time (`ChatSidebar`, `ChatMessageList`, `ChatInput`) dengan rendering aman anti-XSS, pembatasan 1–500 karakter, riwayat pesan snapshot, dan enforcement rate limit 5 pesan per 10 detik.
+- [FE-Social] Implementasi overlay emoji reactions melayang (`ReactionOverlay`, `ReactionPicker`) dengan batas laju 10 reaksi per 10 detik dan auto-dismiss 3 detik.
+- [FE-Social] Implementasi panel daftar peserta (`ParticipantList`) dengan badge peran, status player (Ready/Syncing/Buffering), dan kepatuhan aturan presensi Host saat disconnect (PRD BR-7 & AC-1.5.2).
+- [FE-Social] Penambahan suite unit test Vitest untuk verifikasi logika rate limiting dan presensi host/guest dengan kelulusan 100% (4 tests), 0 error lint, dan verifikasi build produksi berhasil.
 - [Backend] Pembuatan skrip simulasi multi-client ujung ke ujung (`backend/tests/simulate_party.py`) yang memverifikasi 10 langkah alur lengkap: katalog media, pembuatan room, join guest via REST, koneksi WebSocket & seat capacity locking, sinkronisasi pemutaran video berbasis versi, penanganan tabrakan versi (optimistic concurrency conflict / `VERSION_CONFLICT`), promosi peran Host ke Controller, obrolan realtime, verifikasi snapshot ruangan (AP-6), dan kepatuhan aturan presensi Host saat offline (PRD BR-7).
 - [Backend] Penanganan bug `ExpressionAttributeNames` pada `PlaybackRepository.update_playback_state` saat aksi `SEEK` dan refactoring nested conditional expression untuk kebersihan kode.
 - [Backend] Seluruh suite pengujian diverifikasi lulus 100%: 26 unit test (`uv run pytest`), simulasi multi-client (`tests/simulate_party.py`), linter & formatter (`ruff check` & `ruff format`), serta 4 modul Terraform (`data`, `auth`, `api`, `realtime`).
@@ -50,7 +59,8 @@ Aturan:
 - Tidak ada blocker pada sisi backend. Seluruh komponen backend, modul Terraform, skrip packaging, CI workflow, dan dokumentasi handoff telah siap.
 
 **Berikutnya**
-- [Frontend / Integrasi] Handoff ke tim Frontend untuk integrasi antarmuka pengguna dengan local server backend dan pengujian live sync.
+- [FE-Player] Implementasi pemutar video HLS (`hls.js`) dan modul sinkronisasi (`sync client`) dengan kalkulasi drift, clock offset NTP-style, adaptasi playback rate, dan penanganan signed cookies.
+- [Frontend / Integrasi] Pengujian langsung antarmuka dengan `backend/local_server.py`.
 
 ---
 
