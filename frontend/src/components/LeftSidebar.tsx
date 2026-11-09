@@ -10,6 +10,7 @@ import {
   Mic,
   Plus,
   Settings,
+  X,
 } from 'lucide-react'
 import { GamepadIcon, LogoTv, MoonIcon, PopcornIcon } from './Icons'
 
@@ -17,23 +18,37 @@ interface LeftSidebarProps {
   activeRoomId?: string
   onSelectRoom?: (roomId: string) => void
   onCreateRoom?: () => void
+  onClose?: () => void
 }
 
 export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   activeRoomId = 'malam-minggu',
   onSelectRoom,
   onCreateRoom,
+  onClose,
 }) => {
   return (
-    <aside className="w-[260px] lg:w-[270px] shrink-0 h-full flex flex-col bg-[#101115] border-r border-[#1c1e26] select-none text-[#8e929d]">
+    <aside className="w-[260px] lg:w-[270px] max-w-[85vw] shrink-0 h-full flex flex-col bg-[#101115] border-r border-[#1c1e26] select-none text-[#8e929d]">
       {/* 1. Top Logo Header */}
-      <div className="h-14 px-4 flex items-center gap-2.5 border-b border-[#1c1e26] shrink-0">
-        <div className="w-6 h-6 rounded bg-white/10 flex items-center justify-center text-white">
-          <LogoTv className="w-4 h-4 text-white" />
+      <div className="h-14 px-4 flex items-center justify-between border-b border-[#1c1e26] shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="w-6 h-6 rounded bg-white/10 flex items-center justify-center text-white">
+            <LogoTv className="w-4 h-4 text-white" />
+          </div>
+          <span className="font-bold text-[15px] tracking-tight text-white font-sans">
+            watch party
+          </span>
         </div>
-        <span className="font-bold text-[15px] tracking-tight text-white font-sans">
-          watch party
-        </span>
+
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 xl:hidden cursor-pointer"
+            title="Tutup Navigasi"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {/* 2. Body: Left Dock + Navigation Menu */}

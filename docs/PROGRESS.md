@@ -77,6 +77,27 @@ Aturan:
 
 ---
 
+## 2026-11-09 (Senin)
+
+**Selesai**
+- [FE-Layout] Verifikasi & poles responsivitas mobile/tablet/desktop: halaman penguji dihapus setelah selesai; layout 3-kolom drawer (di bawah `xl`) sudah terverifikasi bekerja di 390px, 820px, dan 1440px tanpa overflow horizontal (`tab` dev server port 5174).
+- [FE-Layout] Perbaikan kecil: root `App` dari `w-screen` → `w-full` (mencegah overflow horizontal akibat scrollbar di mobile), baris metadata film diberi `flex-wrap` (agar "Subtitel Indonesia" tidak terdorong menyendiri di mobile), dan tombol play pemutar video diperbesar di mobile (`w-8 h-8` di bawah `sm`) agar target sentuh lebih nyaman.
+- [FE-Social] Pembersihan reaksi emoji: menghapus reaksi `fire` (🔥) dan `clap` (👏) sesuai spesifikasi kontrak, menyisakan 5 emoji resmi: `thumbsUp` (👍), `heart` (❤️), `laugh` (😂), `wow` (😮), dan `sad` (😢).
+- [FE-Player] Konsolidasi model `PlaybackState` menjadi satu definisi tunggal (single source of truth) di `frontend/src/types/watchparty.ts` dan di-reexport dari `frontend/src/types/index.ts`.
+- [FE-Social] Penyempurnaan status player untuk mendukung `"syncing"`: penataan badge status `Syncing` pada kartu peserta di `CenterTheater` dan tab Anggota di `RightSidebar`, serta sinkronisasi tipe `PlayerStatus` (`'unknown' | 'buffering' | 'syncing' | 'ready'`).
+
+**Keputusan + alasan**
+- Menghapus fire & clap dan hanya mempertahankan 5 emoji standar agar selaras 100% dengan skema WebSocket backend (`docs/contracts/ws-messages.schema.json` & `ws-messages.md`).
+- Menjadikan `types/watchparty.ts` sebagai lokasi deklarasi tunggal `PlaybackState` untuk mencegah duplikasi dan perbedaan definisi tipe antar modul.
+
+**Blocker**
+- Tidak ada.
+
+**Berikutnya**
+- Integrasi WebSocket client ke store sosial dan pemutar HLS.
+
+---
+
 ## 2026-11-06 (Jumat)
 
 **Selesai**

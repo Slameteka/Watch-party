@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { LeftSidebar } from './components/LeftSidebar'
 import { CenterTheater } from './components/CenterTheater'
 import { RightSidebar } from './components/RightSidebar'
@@ -6,6 +6,10 @@ import { RightSidebar } from './components/RightSidebar'
 export function App() {
   const [activeRoomId, setActiveRoomId] = useState('malam-minggu')
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+
+  // Mobile/tablet drawer state (only used below xl breakpoint)
+  const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(false)
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false)
 
   const handleInvite = () => {
     const inviteUrl = 'https://watchparty.chescloud.my.id/r/8J3GuXNOz0at'
@@ -19,20 +23,104 @@ export function App() {
     setTimeout(() => setToastMessage(null), 2500)
   }
 
+  const closeLeftSidebar = useCallback(() => setIsLeftSidebarOpen(false), [])
+  const closeRightSidebar = useCallback(() => setIsRightSidebarOpen(false), [])
+  const toggleLeftSidebar = useCallback(() => {
+    setIsLeftSidebarOpen((prev) => !prev)
+    setIsRightSidebarOpen(false)
+  }, [])
+  const toggleRightSidebar = useCallback(() => {
+    setIsRightSidebarOpen((prev) => !prev)
+    setIsLeftSidebarOpen(false)
+  }, [])
+
+  // Close drawers when resizing to desktop
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1280px)')
+    const handler = () => {
+      if (mq.matches) {
+        setIsLeftSidebarOpen(false)
+        setIsRightSidebarOpen(false)
+      }
+    }
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+
+  // Close drawers on Escape key
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsLeftSidebarOpen(false)
+        setIsRightSidebarOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   return (
-    <div className="flex h-screen w-screen bg-[#0c0d11] text-gray-100 overflow-hidden font-sans">
-      {/* 1. Left Navigation Sidebar with Icon Dock (width 280px) */}
-      <LeftSidebar
-        activeRoomId={activeRoomId}
-        onSelectRoom={(id) => setActiveRoomId(id)}
-        onCreateRoom={handleCreateRoom}
+    <div className="flex h-full w-full bg-[#0c0d11] text-gray-100 overflow-hidden font-sans">
+      {/* ===== Left Sidebar — always visible on xl+, drawer below xl ===== */}
+      {/* Desktop: static in flow */}
+      <div className="hidden xl:flex">
+        <LeftSidebar
+          activeRoomId={activeRoomId}
+          onSelectRoom={(id) => setActiveRoomId(id)}
+          onCreateRoom={handleCreateRoom}
+        />
+      </div>
+      {/* Mobile/Tablet: slide-over drawer */}
+      {isLeftSidebarOpen && (
+        <div className="fixed inset-0 z-40 xl:hidden flex">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={closeLeftSidebar}
+            aria-label="Tutup navigasi"
+          />
+          <div className="relative h-full z-10 animate-slide-in-left">
+            <LeftSidebar
+              activeRoomId={activeRoomId}
+              onSelectRoom={(id) => {
+                setActiveRoomId(id)
+                closeLeftSidebar()
+              }}
+              onCreateRoom={() => {
+                handleCreateRoom()
+                closeLeftSidebar()
+              }}
+              onClose={closeLeftSidebar}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ===== Center Main Theater Screen (flex-1) ===== */}
+      <CenterTheater
+        onInvite={handleInvite}
+        onToggleLeftSidebar={toggleLeftSidebar}
+        onToggleRightSidebar={toggleRightSidebar}
+        isRightSidebarOpen={isRightSidebarOpen}
       />
 
-      {/* 2. Center Main Theater Screen (flex-1) */}
-      <CenterTheater onInvite={handleInvite} />
-
-      {/* 3. Right Sidebar: Chat & Social Presence (width 330px) */}
-      <RightSidebar />
+      {/* ===== Right Sidebar — always visible on xl+, drawer below xl ===== */}
+      {/* Desktop: static in flow */}
+      <div className="hidden xl:flex">
+        <RightSidebar />
+      </div>
+      {/* Mobile/Tablet: slide-over drawer from right */}
+      {isRightSidebarOpen && (
+        <div className="fixed inset-0 z-40 xl:hidden flex justify-end">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={closeRightSidebar}
+            aria-label="Tutup obrolan"
+          />
+          <div className="relative h-full z-10 animate-slide-in-right">
+            <RightSidebar onClose={closeRightSidebar} />
+          </div>
+        </div>
+      )}
 
       {/* Toast Notification */}
       {toastMessage && (
