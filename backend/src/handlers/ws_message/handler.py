@@ -18,10 +18,12 @@ from core.models.websocket import (
     MsgChatMessage,
     MsgClockPong,
     MsgError,
+    MsgParticipantUpdated,
     MsgPlaybackState,
     MsgReactionAdded,
     MsgRoomSnapshot,
     MsgSessionEnded,
+    ParticipantUpdatedPayload,
     PlaybackStatePayload,
     ReactionAddedPayload,
     RoomSnapshotPayload,
@@ -43,6 +45,166 @@ def get_apigw_endpoint(event: dict[str, Any]) -> str:
     domain = event["requestContext"]["domainName"]
     stage = event["requestContext"]["stage"]
     return f"https://{domain}/{stage}"
+
+
+def _handle_playback_command(
+    msg: Any,
+    endpoint_url: str,
+    connection_id: str,
+    room_id: str,
+    participant_id: str,
+    now_ms: int,
+) -> None:
+    caller = room_repo.get_participant(room_id, participant_id)
+    if caller.role == Role.VIEWER:
+        send_to_connection(
+            endpoint_url=endpoint_url,
+            connection_id=connection_id,
+            message=MsgError(
+                request_id=msg.request_id,
+                sent_at_ms=now_ms,
+                payload=ErrorPayload(
+                    code=ErrorCode.FORBIDDEN,
+                    message="Viewer role cannot control playback.",
+                    details={"requiredRole": Role.CONTROLLER.value},
+                ),
+            ),
+        )
+        return
+
+    try:
+        new_state = playback_repo.update_playback_state(
+            room_id=room_id,
+            action=msg.payload.action,
+            position_sec=msg.payload.position_sec,
+            base_version=msg.payload.base_version,
+        )
+        broadcast_to_room(
+            endpoint_url=endpoint_url,
+            room_id=room_id,
+            message=MsgPlaybackState(
+                request_id=msg.request_id,
+                sent_at_ms=now_ms,
+                payload=PlaybackStatePayload(
+                    state=new_state,
+                    action=msg.payload.action,
+                    caused_by=participant_id,
+                ),
+            ),
+        )
+    except VersionConflictError as e:
+        current_state = playback_repo.get_playback_state(room_id)
+        send_to_connection(
+            endpoint_url=endpoint_url,
+            connection_id=connection_id,
+            message=MsgError(
+                request_id=msg.request_id,
+                sent_at_ms=now_ms,
+                payload=ErrorPayload(
+                    code=ErrorCode.VERSION_CONFLICT,
+                    message=str(e),
+                    details={"currentState": current_state.model_dump(by_alias=True)},
+                ),
+            ),
+        )
+
+
+def _dispatch_message(
+    msg: Any,
+    endpoint_url: str,
+    connection_id: str,
+    room_id: str,
+    participant_id: str,
+    now_ms: int,
+) -> None:
+    msg_type = msg.type
+
+    if msg_type == "session.resume":
+        snapshot_dict = room_repo.get_room_snapshot(room_id, participant_id)
+        send_to_connection(
+            endpoint_url=endpoint_url,
+            connection_id=connection_id,
+            message=MsgRoomSnapshot(
+                request_id=msg.request_id,
+                sent_at_ms=now_ms,
+                payload=RoomSnapshotPayload.model_validate(snapshot_dict),
+            ),
+        )
+
+    elif msg_type == "clock.ping":
+        send_to_connection(
+            endpoint_url=endpoint_url,
+            connection_id=connection_id,
+            message=MsgClockPong(
+                request_id=msg.request_id,
+                sent_at_ms=now_ms,
+                payload=ClockPongPayload(
+                    client_send_ms=msg.payload.client_send_ms,
+                    server_time_ms=now_ms,
+                ),
+            ),
+        )
+
+    elif msg_type == "playback.command":
+        _handle_playback_command(
+            msg=msg,
+            endpoint_url=endpoint_url,
+            connection_id=connection_id,
+            room_id=room_id,
+            participant_id=participant_id,
+            now_ms=now_ms,
+        )
+
+    elif msg_type == "chat.send":
+        caller = room_repo.get_participant(room_id, participant_id)
+        chat_msg = room_repo.save_chat_message(
+            room_id=room_id,
+            participant_id=participant_id,
+            display_name=caller.display_name,
+            text=msg.payload.text,
+        )
+        broadcast_to_room(
+            endpoint_url=endpoint_url,
+            room_id=room_id,
+            message=MsgChatMessage(
+                request_id=msg.request_id,
+                sent_at_ms=now_ms,
+                payload=ChatMessagePayload(message=chat_msg),
+            ),
+        )
+
+    elif msg_type == "reaction.send":
+        broadcast_to_room(
+            endpoint_url=endpoint_url,
+            room_id=room_id,
+            message=MsgReactionAdded(
+                request_id=msg.request_id,
+                sent_at_ms=now_ms,
+                payload=ReactionAddedPayload(
+                    participant_id=participant_id,
+                    emoji=msg.payload.emoji,
+                ),
+            ),
+        )
+
+    elif msg_type == "player.status":
+        updated_participant = room_repo.update_player_status(
+            room_id=room_id,
+            participant_id=participant_id,
+            status=msg.payload.status,
+        )
+        broadcast_to_room(
+            endpoint_url=endpoint_url,
+            room_id=room_id,
+            message=MsgParticipantUpdated(
+                request_id=msg.request_id,
+                sent_at_ms=now_ms,
+                payload=ParticipantUpdatedPayload(participant=updated_participant),
+            ),
+        )
+
+    elif msg_type in ("heartbeat", "metrics.report"):
+        logger.debug(f"Acknowledged {msg_type} from {participant_id}")
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -114,129 +276,14 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     # 4. Dispatch message based on type
     try:
-        msg_type = msg.type
-
-        if msg_type == "session.resume":
-            snapshot_dict = room_repo.get_room_snapshot(room_id, participant_id)
-            send_to_connection(
-                endpoint_url=endpoint_url,
-                connection_id=connection_id,
-                message=MsgRoomSnapshot(
-                    request_id=msg.request_id,
-                    sent_at_ms=now_ms,
-                    payload=RoomSnapshotPayload.model_validate(snapshot_dict),
-                ),
-            )
-
-        elif msg_type == "clock.ping":
-            send_to_connection(
-                endpoint_url=endpoint_url,
-                connection_id=connection_id,
-                message=MsgClockPong(
-                    request_id=msg.request_id,
-                    sent_at_ms=now_ms,
-                    payload=ClockPongPayload(
-                        client_send_ms=msg.payload.client_send_ms,
-                        server_time_ms=now_ms,
-                    ),
-                ),
-            )
-
-        elif msg_type == "playback.command":
-            # Check permissions (must be host or controller)
-            caller = room_repo.get_participant(room_id, participant_id)
-            if caller.role == Role.VIEWER:
-                send_to_connection(
-                    endpoint_url=endpoint_url,
-                    connection_id=connection_id,
-                    message=MsgError(
-                        request_id=msg.request_id,
-                        sent_at_ms=now_ms,
-                        payload=ErrorPayload(
-                            code=ErrorCode.FORBIDDEN,
-                            message="Viewer role cannot control playback.",
-                            details={"requiredRole": Role.CONTROLLER.value},
-                        ),
-                    ),
-                )
-                return {"statusCode": 200}
-
-            try:
-                new_state = playback_repo.update_playback_state(
-                    room_id=room_id,
-                    action=msg.payload.action,
-                    position_sec=msg.payload.position_sec,
-                    base_version=msg.payload.base_version,
-                )
-                broadcast_to_room(
-                    endpoint_url=endpoint_url,
-                    room_id=room_id,
-                    message=MsgPlaybackState(
-                        request_id=msg.request_id,
-                        sent_at_ms=now_ms,
-                        payload=PlaybackStatePayload(
-                            state=new_state,
-                            action=msg.payload.action,
-                            caused_by=participant_id,
-                        ),
-                    ),
-                )
-            except VersionConflictError as e:
-                current_state = playback_repo.get_playback_state(room_id)
-                send_to_connection(
-                    endpoint_url=endpoint_url,
-                    connection_id=connection_id,
-                    message=MsgError(
-                        request_id=msg.request_id,
-                        sent_at_ms=now_ms,
-                        payload=ErrorPayload(
-                            code=ErrorCode.VERSION_CONFLICT,
-                            message=str(e),
-                            details={"currentState": current_state.model_dump(by_alias=True)},
-                        ),
-                    ),
-                )
-
-        elif msg_type == "chat.send":
-            caller = room_repo.get_participant(room_id, participant_id)
-            chat_msg = room_repo.save_chat_message(
-                room_id=room_id,
-                participant_id=participant_id,
-                display_name=caller.display_name,
-                text=msg.payload.text,
-            )
-            broadcast_to_room(
-                endpoint_url=endpoint_url,
-                room_id=room_id,
-                message=MsgChatMessage(
-                    request_id=msg.request_id,
-                    sent_at_ms=now_ms,
-                    payload=ChatMessagePayload(message=chat_msg),
-                ),
-            )
-
-        elif msg_type == "reaction.send":
-            caller = room_repo.get_participant(room_id, participant_id)
-            broadcast_to_room(
-                endpoint_url=endpoint_url,
-                room_id=room_id,
-                message=MsgReactionAdded(
-                    request_id=msg.request_id,
-                    sent_at_ms=now_ms,
-                    payload=ReactionAddedPayload(
-                        participant_id=participant_id,
-                        display_name=caller.display_name,
-                        emoji=msg.payload.emoji,
-                        added_at_ms=now_ms,
-                    ),
-                ),
-            )
-
-        elif msg_type == "player.status":
-            room_repo.update_player_status(room_id, participant_id, msg.payload.status)
-
-        elif msg_type in ("heartbeat", "metrics.report"):
-            pass
+        _dispatch_message(
+            msg=msg,
+            endpoint_url=endpoint_url,
+            connection_id=connection_id,
+            room_id=room_id,
+            participant_id=participant_id,
+            now_ms=now_ms,
+        )
 
     except WatchPartyError as e:
         send_to_connection(

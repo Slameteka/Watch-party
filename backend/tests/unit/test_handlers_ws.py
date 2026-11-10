@@ -222,3 +222,77 @@ def test_ws_message_chat_and_clock_ping(sample_room_setup, mocker):
     sent_data = json.loads(call_args["Data"].decode("utf-8"))
     assert sent_data["type"] == "clock.pong"
     assert sent_data["payload"]["clientSendMs"] == 1700000000000
+
+
+def test_ws_message_player_status_broadcast(sample_room_setup, mocker):
+    room, host, guest = sample_room_setup
+    conn_repo = ConnectionRepository()
+    conn_repo.handle_connect("conn-host-1", room.room_id, host.participant_id)
+    conn_repo.handle_connect("conn-guest-1", room.room_id, guest.participant_id)
+
+    mock_post = mocker.patch("core.broadcast.gateway.get_apigw_client")
+    mock_client = mocker.MagicMock()
+    mock_post.return_value = mock_client
+
+    status_msg = {
+        "v": 1,
+        "type": "player.status",
+        "requestId": "req-status-1",
+        "sentAtMs": 1700000000000,
+        "payload": {"status": "buffering"},
+    }
+    event = {
+        "requestContext": {
+            "connectionId": "conn-guest-1",
+            "domainName": "ws.watchparty.chescloud.my.id",
+            "stage": "prod",
+        },
+        "body": json.dumps(status_msg),
+    }
+    res = message_handler(event, None)
+    assert res["statusCode"] == 200
+    assert mock_client.post_to_connection.called
+
+    # Verify participant.updated was broadcast to connection
+    call_args = mock_client.post_to_connection.call_args[1]
+    sent_data = json.loads(call_args["Data"].decode("utf-8"))
+    assert sent_data["type"] == "participant.updated"
+    assert sent_data["payload"]["participant"]["participantId"] == guest.participant_id
+    assert sent_data["payload"]["participant"]["playerStatus"] == "buffering"
+
+
+def test_ws_message_reaction_broadcast(sample_room_setup, mocker):
+    room, host, _ = sample_room_setup
+    conn_repo = ConnectionRepository()
+    conn_repo.handle_connect("conn-host-1", room.room_id, host.participant_id)
+
+    mock_post = mocker.patch("core.broadcast.gateway.get_apigw_client")
+    mock_client = mocker.MagicMock()
+    mock_post.return_value = mock_client
+
+    reaction_msg = {
+        "v": 1,
+        "type": "reaction.send",
+        "requestId": "req-rx-1",
+        "sentAtMs": 1700000000000,
+        "payload": {"emoji": "heart"},
+    }
+    event = {
+        "requestContext": {
+            "connectionId": "conn-host-1",
+            "domainName": "ws.watchparty.chescloud.my.id",
+            "stage": "prod",
+        },
+        "body": json.dumps(reaction_msg),
+    }
+    res = message_handler(event, None)
+    assert res["statusCode"] == 200
+    assert mock_client.post_to_connection.called
+
+    call_args = mock_client.post_to_connection.call_args[1]
+    sent_data = json.loads(call_args["Data"].decode("utf-8"))
+    assert sent_data["type"] == "reaction.added"
+    assert sent_data["payload"] == {
+        "participantId": host.participant_id,
+        "emoji": "heart",
+    }

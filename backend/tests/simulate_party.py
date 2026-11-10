@@ -34,7 +34,7 @@ from moto import mock_aws  # noqa: E402
 
 from core.catalog_data import DEFAULT_CATALOG_ITEMS  # noqa: E402
 from core.errors import VersionConflictError  # noqa: E402
-from core.models.common import PlaybackAction, Role, RoomStatus  # noqa: E402
+from core.models.common import PlaybackAction, PlayerStatus, Role, RoomStatus  # noqa: E402
 from core.repository.connection_repo import ConnectionRepository  # noqa: E402
 from core.repository.playback_repo import PlaybackRepository  # noqa: E402
 from core.repository.room_repo import RoomRepository  # noqa: E402
@@ -257,9 +257,31 @@ def run_simulation():
         )
 
         # -------------------------------------------------------------
-        # 8. Chat Messages & History (AP-9)
+        # 8. Player Status Synchronization (AC-1.5.3, F-2.4)
         # -------------------------------------------------------------
-        log_step("STEP 8: Realtime Chat Messages")
+        log_step("STEP 8: Player Status Synchronization (F-2.4 & AC-1.5.3)")
+        print("🔄 Bob encounters network buffering -> sends player.status='buffering'...")
+        bob_updated = room_repo.update_player_status(
+            room_id=room_id,
+            participant_id=bob_guest.participant_id,
+            status="buffering",
+        )
+        print(f"   Bob player status updated: {bob_updated.player_status.value}")
+        assert bob_updated.player_status == PlayerStatus.BUFFERING
+
+        print("✅ Bob finishes buffering -> sends player.status='ready'...")
+        bob_ready = room_repo.update_player_status(
+            room_id=room_id,
+            participant_id=bob_guest.participant_id,
+            status="ready",
+        )
+        print(f"   Bob player status restored: {bob_ready.player_status.value}")
+        assert bob_ready.player_status == PlayerStatus.READY
+
+        # -------------------------------------------------------------
+        # 9. Chat Messages & History (AP-9)
+        # -------------------------------------------------------------
+        log_step("STEP 9: Realtime Chat Messages")
         msg1 = room_repo.save_chat_message(
             room_id=room_id,
             participant_id=bob_guest.participant_id,
@@ -277,9 +299,9 @@ def run_simulation():
         print(f"💬 Charlie: '{msg2.text}'")
 
         # -------------------------------------------------------------
-        # 9. Room Snapshot Verification (AP-6)
+        # 10. Room Snapshot Verification (AP-6)
         # -------------------------------------------------------------
-        log_step("STEP 9: Full Room Snapshot Verification (AP-6)")
+        log_step("STEP 10: Full Room Snapshot Verification (AP-6)")
         snapshot = room_repo.get_room_snapshot(room_id, participant_id=alice_host.participant_id)
         room_data = snapshot["room"]
         playback_data = snapshot["playback"]
@@ -297,9 +319,9 @@ def run_simulation():
         print(f"   - Chat History:        {len(recent_chat_data)} messages")
 
         # -------------------------------------------------------------
-        # 10. Disconnect & Presence Handling (PRD BR-7)
+        # 11. Disconnect & Presence Handling (PRD BR-7)
         # -------------------------------------------------------------
-        log_step("STEP 10: Disconnects & Business Rule 7 (BR-7)")
+        log_step("STEP 11: Disconnects & Business Rule 7 (BR-7)")
         print("👋 Charlie disconnects...")
         c_broadcast, c_room_id, c_part_id, c_is_host = conn_repo.handle_disconnect(
             connection_id="conn-charlie-01"

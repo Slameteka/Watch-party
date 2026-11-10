@@ -195,93 +195,115 @@ Koneksi WebSocket menggunakan URL:
 ws://localhost:8000?token=<roomToken>
 ```
 
-### 3.1 Handshake & Snapshot Awal
-Setelah koneksi terbuka dan token tervalidasi oleh authorizer, server akan langsung mengirimkan event `room.snapshot`:
+### 3.1 Format Envelope Pesan
+
+Setiap pesan WebSocket (baik dari Client maupun Server) dibungkus dalam format envelope standar v1:
 ```json
 {
+  "v": 1,
+  "type": "playback.command",
+  "requestId": "req_123",
+  "sentAtMs": 1730870500000,
+  "payload": { ... }
+}
+```
+
+Setelah koneksi `$connect` terbuka dan tervalidasi, client mengirim `session.resume` untuk mendapatkan `room.snapshot`:
+```json
+{
+  "v": 1,
   "type": "room.snapshot",
-  "room": {
-    "roomId": "8J3GuXNOz0at",
-    "status": "open",
-    "participantCount": 3
-  },
-  "media": {
-    "mediaId": "sintel",
-    "title": "Sintel",
-    "durationSec": 888.0,
-    "playbackUrl": "..."
-  },
-  "playback": {
-    "status": "playing",
-    "positionSec": 75.5,
-    "playbackRate": 1.0,
-    "updatedAtServerMs": 1730870500000,
-    "version": 3
-  },
-  "participants": [
-    { "participantId": "p_XoRexsrtexvrAbw3", "displayName": "Alice", "role": "host", "connected": true },
-    { "participantId": "p_NqLN1F5bXA9lTEhT", "displayName": "Bob", "role": "controller", "connected": true }
-  ],
-  "recentChat": [ ... ],
-  "self": {
-    "participantId": "p_NqLN1F5bXA9lTEhT",
-    "role": "controller"
+  "sentAtMs": 1730870500123,
+  "payload": {
+    "room": {
+      "roomId": "8J3GuXNOz0at",
+      "status": "open",
+      "participantCount": 3
+    },
+    "media": {
+      "mediaId": "sintel",
+      "title": "Sintel",
+      "durationSec": 888.0,
+      "playbackUrl": "https://media.chescloud.my.id/hls/sintel/master.m3u8"
+    },
+    "playback": {
+      "roomId": "8J3GuXNOz0at",
+      "mediaId": "sintel",
+      "status": "playing",
+      "positionSec": 75.5,
+      "playbackRate": 1.0,
+      "updatedAtServerMs": 1730870500000,
+      "version": 3
+    },
+    "participants": [
+      { "participantId": "p_XoRexsrtexvrAbw3", "displayName": "Alice", "role": "host", "playerStatus": "ready", "connected": true, "joinedAtMs": 1730870400000 },
+      { "participantId": "p_NqLN1F5bXA9lTEhT", "displayName": "Bob", "role": "controller", "playerStatus": "ready", "connected": true, "joinedAtMs": 1730870410000 }
+    ],
+    "recentChat": [],
+    "self": {
+      "participantId": "p_NqLN1F5bXA9lTEhT",
+      "role": "controller"
+    }
   }
 }
 ```
 
 ### 3.2 Pesan Client-to-Server
 
-| Event Type | Dikirim Oleh | Payload Body | Keterangan |
+| `type` | Payload | Balasan / Efek | Rate Limit |
 |---|---|---|---|
-| `playback.command` | `host`, `controller` | `{"action": "play" \| "pause" \| "seek", "positionSec": 75.5, "playbackRate": 1.0, "baseVersion": 3}` | Memperbarui pemutaran video. Wajib menyertakan `baseVersion` terakhir yang diterima client. |
-| `chat.send` | Semua | `{"text": "Halo semuanya!"}` | Mengirim obrolan (maks 280 karakter). |
-| `reaction.send` | Semua | `{"emoji": "🔥"}` | Mengirim reaksi emoji live (hanya emoji terdaftar). |
-| `player.status` | Semua | `{"status": "buffering" \| "ready" \| "syncing"}` | Status buffer player lokal untuk observabilitas host. |
-| `participant.role` | `host` | `{"targetParticipantId": "p_...", "role": "controller" \| "viewer"}` | Promosi/demosi hak kontrol pemutaran. |
-| `participant.kick` | `host` | `{"targetParticipantId": "p_..."}` | Mengeluarkan partisipan dari room. |
-| `session.resume` | Semua | `{}` | Meminta snapshot terbaru setelah reconnect. |
-| `heartbeat` | Semua | `{}` | Ping keep-alive koneksi WebSocket. |
+| `session.resume` | `{"lastVersion"?: integer}` | `room.snapshot` ke pengirim | — |
+| `clock.ping` | `{"clientSendMs": integer}` | `clock.pong` ke pengirim | 10 per 10 s |
+| `heartbeat` | `{}` | Mempertahankan koneksi aktif | — |
+| `playback.command` | `{"action": "play" \| "pause" \| "seek", "positionSec": number, "baseVersion": integer}` | Broadcast `playback.state` ke seluruh room | 10 per 10 s |
+| `player.status` | `{"status": "buffering" \| "syncing" \| "ready"}` | Broadcast `participant.updated` ke seluruh room | 10 per 10 s |
+| `chat.send` | `{"text": string 1–500 karakter}` | Broadcast `chat.message` ke seluruh room | 5 per 10 s |
+| `reaction.send` | `{"emoji": "thumbsUp" \| "heart" \| "laugh" \| "wow" \| "sad"}` | Broadcast `reaction.added` ke seluruh room | 10 per 10 s |
+| `metrics.report` | `{"windowSec": 30, "driftMs": [...]}` | CloudWatch EMF metric | 1 per 15 s |
 
-### 3.3 Pesan Server-to-Client Broadcast
+### 3.3 Pesan Server-to-Client
 
-| Event Type | Diterima Oleh | Payload Utama |
+| `type` | Penerima | Payload Utama |
 |---|---|---|
-| `playback.state` | Seluruh Room | `{ status, positionSec, playbackRate, updatedAtServerMs, version }` |
-| `chat.message` | Seluruh Room | `{ messageId, participantId, displayName, text, createdAtMs }` |
-| `reaction.broadcast` | Seluruh Room | `{ participantId, emoji }` |
-| `presence.join` | Seluruh Room | `{ participant: { participantId, displayName, role, connected: true } }` |
-| `presence.leave` | Seluruh Room | `{ participantId, isHost }` |
-| `participant.role_changed` | Seluruh Room | `{ participantId, role }` |
-| `participant.kicked` | Seluruh Room | `{ participantId }` |
-| `error` | Client Pemanggil | `{ code, message, details? }` *(misal: `VERSION_CONFLICT`, `FORBIDDEN`, `ROOM_FULL`)* |
+| `room.snapshot` | Pengirim `session.resume` | `{ room, media, playback, participants, recentChat, self }` |
+| `playback.state` | Seluruh Room | `{ state: PlaybackState, action, causedBy: participantId }` |
+| `clock.pong` | Pengirim `clock.ping` | `{ clientSendMs, serverTimeMs }` |
+| `participant.joined` | Seluruh Room | `{ participant: Participant }` (saat guest terhubung) |
+| `participant.updated` | Seluruh Room | `{ participant: Participant }` (peran berubah, playerStatus, atau host reconnect/disconnect) |
+| `participant.left` | Seluruh Room | `{ participantId, reason: "disconnected" \| "kicked" }` (guest disconnect) |
+| `chat.message` | Seluruh Room | `{ message: ChatMessage }` |
+| `reaction.added` | Seluruh Room | `{ participantId, emoji }` |
+| `session.ended` | Klien Terkait | `{ reason: "kicked" \| "roomClosed" \| "expired" \| "replaced" }` |
+| `error` | Klien Pemanggil | `{ code, message, details? }` *(misal: `VERSION_CONFLICT`, `FORBIDDEN`, `VALIDATION_ERROR`)* |
 
 ---
 
 ## 4. Konsep Kunci Sinkronisasi (Optimistic Concurrency Control)
 
-- **Sinkronisasi Berbasis State:** Server mempertahankan state pemutaran `{ status, positionSec, playbackRate, updatedAtServerMs, version }`.
-- **Menghindari Konflik Versi:** Setiap kali client mengirim `playback.command`, client harus menyertakan `baseVersion` saat ini. Jika server telah berpindah ke versi yang lebih tinggi akibat aksi pengguna lain, server akan menolak update dengan error `VERSION_CONFLICT`. Client cukup menyesuaikan player dengan event `playback.state` terbaru.
+- **Sinkronisasi Berbasis State:** Server mempertahankan state pemutaran `{ roomId, mediaId, status, positionSec, playbackRate, updatedAtServerMs, version }`.
+- **Menghindari Konflik Versi:** Setiap kali client mengirim `playback.command`, client harus menyertakan `baseVersion` saat ini. Jika server telah berpindah ke versi yang lebih tinggi akibat aksi pengguna lain, server akan menolak update dengan error `VERSION_CONFLICT` dan menyertakan `details.currentState`. Client cukup menyesuaikan player dengan event `playback.state` terbaru.
 - **Business Rule 7 (BR-7):** Jika Host menutup tab atau mengalami pemutusan jaringan sementara, Host **tetap tercatat** dalam daftar partisipan (status `connected = false`). Ruangan tidak langsung ditutup dan pemutaran tidak otomatis terhenti, memberi kesempatan Host untuk reconnect dan melanjutkan sesi.
 
 ---
 
 ## 5. Pengujian & Quality Assurance
 
-### 5.1 Menjalankan Unit Tests (26 Tests)
+### 5.1 Menjalankan Unit Tests (28 Tests)
 ```bash
 uv run pytest
 ```
 
-### 5.2 Menjalankan Simulasi Multi-Client Lengkap
+### 5.2 Menjalankan Simulasi Multi-Client Lengkap (11 Langkah)
 Simulasi skenario ujung ke ujung melibatkan 3 client (Alice/Host, Bob/Guest, Charlie/Guest) mencakup:
 1. Pembuatan Room & Join via REST API.
 2. Koneksi WebSocket & penguncian kapasitas kursi (Seat Locking).
 3. Playback commands (`play`, `seek`) dengan versioning.
-4. Uji tabrakan versi (Optimistic Concurrency Conflict / `VERSION_CONFLICT`).
-5. Promosi role (Host mengangkat Bob menjadi Controller).
-6. Obrolan realtime dan verifikasi snapshot (AP-6).
-7. Disconnect presensi Host (verifikasi kepatuhan aturan bisnis PRD BR-7).
+4. Optimistic concurrency conflict rejection (`VERSION_CONFLICT`).
+5. Role promotion (Host -> Bob jadi Controller).
+6. Player status synchronization (`buffering` -> `ready` broadcast).
+7. Realtime chat & emoji reactions.
+8. Snapshot verification (AP-6).
+9. Disconnect presensi Host (verifikasi kepatuhan aturan bisnis PRD BR-7).
 
 ```bash
 uv run python tests/simulate_party.py

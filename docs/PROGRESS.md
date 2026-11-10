@@ -31,6 +31,50 @@ Aturan:
 - Biaya bulan berjalan: $__ | Sisa credits: $__ | Alert budget terakhir: __%
 ```
 
+## 2026-11-10 (Selasa)
+
+**Selesai**
+- [Backend] Penyempurnaan router pesan WebSocket (`ws_message/handler.py`):
+  - Penambahan broadcast `MsgParticipantUpdated` ke seluruh room saat menerima event `player.status`, menjamin kepatuhan 100% terhadap PRD AC-1.5.3 dan F-2.4.
+  - Optimasi `RoomRepository.update_player_status` menggunakan DynamoDB `ReturnValues="ALL_NEW"` untuk efisiensi update status player tanpa query round-trip tambahan.
+  - Penyelarasan skema `ReactionAddedPayload` (`models/websocket.py`) dengan `docs/contracts/ws-messages.schema.json` (hanya `participantId` dan `emoji` dengan `additionalProperties: false`).
+  - Refactoring handler pesan menjadi fungsi modular `_dispatch_message` dan `_handle_playback_command`, menurunkan cognitive complexity SonarQube ke batas aman.
+  - Penambahan unit tests di `backend/tests/unit/test_handlers_ws.py` untuk menguji broadcast `player.status` dan `reaction.send` (total 28 unit tests lulus 100%).
+  - Pembaruan skrip simulasi multi-client `backend/tests/simulate_party.py` (11 langkah lulus 100%).
+  - Penyelarasan dokumentasi WebSocket pada `backend/README.md`.
+
+**Keputusan + alasan**
+- Penyelarasan ketat terhadap `ws-messages.schema.json` pada payload reaksi dan event broadcast player status — mencegah kegagalan validasi payload pada client frontend yang menerapkan skema kontrak JSON resmi.
+
+**Blocker**
+- Menunggu delegasi 4 record NS Route 53 ke dashboard DNS Cloudflare domain `chescloud.my.id`.
+
+**Berikutnya**
+- [Platform / Backend] Penyiapan modul root Terraform `infra/terraform/envs/prod/` untuk eksekusi deployment infrastruktur ke akun AWS pribadi `944551807382`.
+
+---
+
+## 2026-11-09 (Senin)
+
+**Selesai**
+- [Platform/Infra] Setup fondasi infrastruktur dan akses terisolasi pada akun AWS pribadi `944551807382` di region Singapura (`ap-southeast-1`):
+  - Pembuatan policy financial guardrail `WatchParty-CostAndRegionGuardrail` untuk memblokir otomatis NAT Gateway, service mahal (ElastiCache, MediaConvert, Chime), dan pembatasan peluncuran resource hanya di Singapura (`ap-southeast-1`) & N. Virginia (`us-east-1`).
+  - Pembuatan IAM group `watchparty-platform` dan user `platform-alfido` (AdministratorAccess + Guardrail) serta verifikasi penolakan otomatis (*explicit deny*) di luar region Singapura.
+  - Pembuatan IAM group `watchparty-rtc-media` dan user `media-engineer` dengan hak akses terbatas ke EC2, S3, dan SSM ReadOnly + Guardrail.
+  - Pembuatan S3 backend state bucket `watchparty-tfstate-944551807382` dengan versioning, SSE-S3 encryption, dan public access block.
+  - Pembuatan parameter rahasia SSM SecureString (`/watchparty/prod/room-token-signing-key`, `/watchparty/prod/livekit-api-key`, `/watchparty/prod/livekit-api-secret`).
+  - Pembuatan Route 53 hosted zone untuk `watchparty.chescloud.my.id` (Zone ID `Z04089962SK6XCPTK8YBC`).
+
+**Keputusan + alasan**
+- Penggunaan akun AWS pribadi `944551807382` sebagai target infrastruktur utama dengan pagar pengaman (guardrail) — mengatasi kendala keterbatasan SCP region Sydney pada akun teman (`284043564012`) sehingga tim dapat melakukan deployment di region Singapura dengan latensi optimal dan biaya terkendali.
+- Pemisahan grup IAM berbasis role dengan guardrail terlampir — memastikan setiap anggota tim tetap memegang jobdesk masing-masing tanpa risiko salah launch service mahal atau menembus batas free-tier.
+
+**Blocker**
+- Menunggu delegasi 4 record NS Route 53 ke dashboard DNS Cloudflare domain `chescloud.my.id`.
+
+**Berikutnya**
+- [Platform] Update 4 record NS di Cloudflare dan eksekusi deployment Terraform backend/infrastruktur ke akun `944551807382`.
+
 ---
 
 ## 2026-11-06 (Jumat)
