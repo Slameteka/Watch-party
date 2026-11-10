@@ -6,7 +6,6 @@ from pydantic import Field
 
 from core.models.common import (
     CamelModel,
-    DisplayName,
     Emoji,
     ErrorCode,
     ParticipantId,
@@ -209,9 +208,7 @@ class MsgChatMessage(WsEnvelope):
 
 class ReactionAddedPayload(CamelModel):
     participant_id: ParticipantId
-    display_name: DisplayName
     emoji: Emoji
-    added_at_ms: int
 
 
 class MsgReactionAdded(WsEnvelope):

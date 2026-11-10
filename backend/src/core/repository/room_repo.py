@@ -360,12 +360,22 @@ class RoomRepository:
                 raise ForbiddenError("Cannot modify host role or kicked participant.") from e
             raise
 
-    def update_player_status(self, room_id: str, participant_id: str, status: str) -> None:
-        """Updates participant player status (e.g. ready, buffering, syncing)."""
-        self.table.update_item(
+    def update_player_status(self, room_id: str, participant_id: str, status: str) -> Participant:
+        """Updates participant player status (e.g. ready, buffering, syncing) and returns updated Participant."""
+        resp = self.table.update_item(
             Key={"PK": f"ROOM#{room_id}", "SK": f"PARTICIPANT#{participant_id}"},
             UpdateExpression="SET playerStatus = :status",
             ExpressionAttributeValues={":status": status},
+            ReturnValues="ALL_NEW",
+        )
+        item = resp.get("Attributes", {})
+        return Participant(
+            participant_id=participant_id,
+            display_name=item["displayName"],
+            role=Role(item["role"]),
+            player_status=PlayerStatus(item["playerStatus"]),
+            connected=bool(item.get("connected", False)),
+            joined_at_ms=int(item["joinedAtMs"]),
         )
 
     def save_chat_message(
