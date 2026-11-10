@@ -7,6 +7,8 @@ import {
   Info,
   Link2,
   Lock,
+  Menu,
+  MessageSquare,
   Mic,
   MicOff,
   MoreHorizontal,
@@ -29,9 +31,17 @@ import {
 
 interface CenterTheaterProps {
   onInvite?: () => void
+  onToggleLeftSidebar?: () => void
+  onToggleRightSidebar?: () => void
+  isRightSidebarOpen?: boolean
 }
 
-export const CenterTheater: React.FC<CenterTheaterProps> = ({ onInvite }) => {
+export const CenterTheater: React.FC<CenterTheaterProps> = ({
+  onInvite,
+  onToggleLeftSidebar,
+  onToggleRightSidebar,
+  isRightSidebarOpen = false,
+}) => {
   const [isPlaying, setIsPlaying] = useState(true)
   const [isMicActive, setIsMicActive] = useState(true)
   const [isCameraActive, setIsCameraActive] = useState(false)
@@ -40,7 +50,7 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({ onInvite }) => {
   // Floating reactions simulation
   const [reactions, setReactions] = useState<{ id: number; emoji: string }[]>([
     { id: 1, emoji: '❤️' },
-    { id: 2, emoji: '🔥' },
+    { id: 2, emoji: '👍' },
   ])
 
   const addReaction = (emoji: string) => {
@@ -54,28 +64,52 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({ onInvite }) => {
   return (
     <main className="flex-1 flex flex-col h-full bg-[#0c0d10] overflow-hidden select-none text-[#8e929d]">
       {/* 1. Sub-header Breadcrumb Bar (Height 56px / h-14) */}
-      <div className="h-14 px-6 flex items-center justify-between border-b border-[#1c1e26] shrink-0">
-        <div className="flex items-center gap-2">
-          <Clapperboard className="w-4 h-4 text-white" />
-          <span className="font-semibold text-white text-[13px]">Malam Minggu</span>
-          <span className="flex items-center gap-1 text-[11px] text-gray-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/5 ml-1">
+      <div className="h-14 px-3 sm:px-6 flex items-center justify-between border-b border-[#1c1e26] shrink-0 gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {/* Mobile & Tablet Navigation Drawer Toggle */}
+          <button
+            onClick={onToggleLeftSidebar}
+            className="p-1.5 -ml-1 text-gray-400 hover:text-white rounded-lg hover:bg-white/5 xl:hidden cursor-pointer shrink-0"
+            title="Buka Navigasi"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+
+          <Clapperboard className="w-4 h-4 text-white shrink-0" />
+          <span className="font-semibold text-white text-[13px] truncate">Malam Minggu</span>
+          <span className="hidden sm:flex items-center gap-1 text-[11px] text-gray-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/5 ml-1 shrink-0">
             <Lock className="w-3 h-3 text-gray-400" />
             Privat
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Tersinkron</span>
+            <span className="hidden md:inline">Tersinkron</span>
           </div>
 
           <button
             onClick={onInvite}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#151720] hover:bg-[#1e212d] text-xs font-medium text-white border border-[#252838] transition-all cursor-pointer shadow-sm"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-[#151720] hover:bg-[#1e212d] text-xs font-medium text-white border border-[#252838] transition-all cursor-pointer shadow-sm"
           >
             <UserPlus className="w-3.5 h-3.5" />
-            <span>Undang teman</span>
+            <span className="hidden sm:inline">Undang teman</span>
+          </button>
+
+          {/* Toggle Right Sidebar (Chat & Anggota) for Mobile & Tablet */}
+          <button
+            onClick={onToggleRightSidebar}
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-medium border transition-all cursor-pointer xl:hidden ${
+              isRightSidebarOpen
+                ? 'bg-purple-600/30 text-purple-200 border-purple-500/50'
+                : 'bg-[#151720] hover:bg-[#1e212d] text-gray-300 border-[#252838]'
+            }`}
+            title="Buka Obrolan & Anggota"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span className="hidden md:inline">Obrolan</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
           </button>
 
           <button
@@ -88,7 +122,7 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({ onInvite }) => {
       </div>
 
       {/* 2. Scrollable Center Theater Content */}
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+      <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-4">
         {/* Title Header with Host Controller Badge */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
@@ -166,22 +200,22 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({ onInvite }) => {
             {/* Controls Row */}
             <div className="flex items-center justify-between text-xs text-gray-300">
               {/* Left Controls */}
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 sm:gap-3">
                 <button
                   onClick={() => setIsPlaying(!isPlaying)}
-                  className="w-6 h-6 rounded-md bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all cursor-pointer"
+                  className="w-8 h-8 sm:w-6 sm:h-6 rounded-md bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
                 >
                   {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
                 </button>
 
                 <button
-                  className="p-1 hover:text-white transition-colors cursor-pointer"
+                  className="p-1 hover:text-white transition-colors cursor-pointer shrink-0"
                   title="Putar balik 10 detik"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                 </button>
 
-                <div className="flex items-center gap-1.5 group/vol">
+                <div className="hidden sm:flex items-center gap-1.5 group/vol">
                   <Volume2 className="w-3.5 h-3.5 text-gray-400 group-hover/vol:text-white" />
                   <input
                     type="range"
@@ -189,16 +223,18 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({ onInvite }) => {
                     max="100"
                     value={volume}
                     onChange={(e) => setVolume(Number(e.target.value))}
-                    className="w-16 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
+                    className="w-14 md:w-16 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
                   />
                 </div>
 
-                <span className="text-[11px] text-gray-400 font-mono">42:18 / 1:48:32</span>
+                <span className="text-[10px] sm:text-[11px] text-gray-400 font-mono shrink-0">
+                  42:18 / 1:48:32
+                </span>
               </div>
 
               {/* Right Controls */}
-              <div className="flex items-center gap-3">
-                <span className="text-[11px] font-semibold text-gray-300 bg-white/10 px-1.5 py-0.5 rounded">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <span className="text-[10px] sm:text-[11px] font-semibold text-gray-300 bg-white/10 px-1.5 py-0.5 rounded">
                   1080p
                 </span>
                 <button
@@ -208,7 +244,7 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({ onInvite }) => {
                   <SubtitlesIcon className="w-3.5 h-3.5" />
                 </button>
                 <button
-                  className="p-1 hover:text-white transition-colors cursor-pointer"
+                  className="hidden sm:block p-1 hover:text-white transition-colors cursor-pointer"
                   title="Picture-in-picture"
                 >
                   <PipIcon className="w-3.5 h-3.5" />
@@ -230,7 +266,7 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({ onInvite }) => {
             <h2 className="text-base md:text-lg font-bold text-white tracking-tight">
               Langit Setelah Hujan
             </h2>
-            <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-0.5">
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-gray-400 mt-0.5">
               <span>2025</span>
               <span>·</span>
               <span>Drama, Petualangan</span>
@@ -261,19 +297,19 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({ onInvite }) => {
         <div className="flex flex-wrap items-center justify-between gap-3 py-2 border-y border-[#181a22]">
           <div className="flex items-center gap-2 flex-wrap">
             <button
+              onClick={() => addReaction('👍')}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#151720] hover:bg-[#1d202c] border border-[#252838] text-xs font-medium text-gray-200 transition-all cursor-pointer active:scale-95"
+            >
+              <span>👍</span>
+              <span>12</span>
+            </button>
+
+            <button
               onClick={() => addReaction('❤️')}
               className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#151720] hover:bg-[#1d202c] border border-[#252838] text-xs font-medium text-gray-200 transition-all cursor-pointer active:scale-95"
             >
               <span>❤️</span>
               <span>8</span>
-            </button>
-
-            <button
-              onClick={() => addReaction('🔥')}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#151720] hover:bg-[#1d202c] border border-[#252838] text-xs font-medium text-gray-200 transition-all cursor-pointer active:scale-95"
-            >
-              <span>🔥</span>
-              <span>6</span>
             </button>
 
             <button
@@ -293,11 +329,11 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({ onInvite }) => {
             </button>
 
             <button
-              onClick={() => addReaction('👏')}
+              onClick={() => addReaction('😢')}
               className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#151720] hover:bg-[#1d202c] border border-[#252838] text-xs font-medium text-gray-200 transition-all cursor-pointer active:scale-95"
             >
-              <span>👏</span>
-              <span>3</span>
+              <span>😢</span>
+              <span>1</span>
             </button>
 
             <button
@@ -317,35 +353,37 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({ onInvite }) => {
             <h3 className="text-xs font-semibold text-white">Satu layar, enam cerita</h3>
 
             {/* Media Toggles */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <button
                 onClick={() => setIsMicActive(!isMicActive)}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer border ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer border ${
                   isMicActive
                     ? 'bg-[#151720] text-white border-[#252838]'
                     : 'bg-rose-500/10 text-rose-300 border-rose-500/30'
                 }`}
               >
                 {isMicActive ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
-                <span>{isMicActive ? 'Mikrofon aktif' : 'Mikrofon mati'}</span>
+                <span className="hidden sm:inline">{isMicActive ? 'Mikrofon aktif' : 'Mikrofon mati'}</span>
+                <span className="sm:hidden">{isMicActive ? 'Mic' : 'Mute'}</span>
               </button>
 
               <button
                 onClick={() => setIsCameraActive(!isCameraActive)}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer border ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer border ${
                   isCameraActive
                     ? 'bg-purple-600 text-white border-purple-500'
                     : 'bg-[#151720] text-gray-300 border-[#252838]'
                 }`}
               >
                 <VideoOff className="w-3.5 h-3.5" />
-                <span>{isCameraActive ? 'Kamera aktif' : 'Kamera mati'}</span>
+                <span className="hidden sm:inline">{isCameraActive ? 'Kamera aktif' : 'Kamera mati'}</span>
+                <span className="sm:hidden">{isCameraActive ? 'Kamera' : 'Off'}</span>
               </button>
             </div>
           </div>
 
           {/* 6 Participant Tiles in One Row (Avatar on LEFT, text on RIGHT) */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 sm:gap-2.5">
             {/* 1. Raka (Host) */}
             <div className="p-3 rounded-2xl bg-[#14161f] border border-[#202432] flex items-center gap-2.5 min-w-0">
               <span className="w-7 h-7 rounded-full bg-[#d97757] text-white font-bold text-xs flex items-center justify-center shrink-0">
@@ -402,16 +440,16 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({ onInvite }) => {
               </div>
             </div>
 
-            {/* 5. Fajar (Menyimak) */}
-            <div className="p-3 rounded-2xl bg-[#14161f] border border-[#202432] flex items-center gap-2.5 min-w-0">
+            {/* 5. Fajar (Syncing) */}
+            <div className="p-3 rounded-2xl bg-[#14161f] border border-amber-500/30 ring-1 ring-amber-500/20 flex items-center gap-2.5 min-w-0">
               <span className="w-7 h-7 rounded-full bg-[#414856] text-white font-bold text-xs flex items-center justify-center shrink-0">
                 FA
               </span>
               <div className="min-w-0 leading-tight">
                 <div className="text-xs font-semibold text-white truncate">Fajar</div>
-                <div className="text-[10px] text-gray-500 mt-0.5 flex items-center gap-1">
-                  <MicOff className="w-2.5 h-2.5" />
-                  <span>Menyimak</span>
+                <div className="flex items-center gap-1 text-[10px] text-amber-400 font-medium mt-0.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  <span>Syncing</span>
                 </div>
               </div>
             </div>
@@ -433,13 +471,13 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({ onInvite }) => {
         </div>
 
         {/* 7. Bottom Sync Bar */}
-        <div className="flex items-center justify-between py-2 px-3.5 rounded-xl bg-[#12141c]/70 border border-[#1b1f2b] text-[11px] text-gray-400">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-2 px-3.5 rounded-xl bg-[#12141c]/70 border border-[#1b1f2b] text-[11px] text-gray-400">
           <div className="flex items-center gap-2">
-            <Link2 className="w-3.5 h-3.5 text-gray-400" />
+            <Link2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />
             <span>Pemutaran tersinkron untuk semua. Nggak ada yang ketinggalan cerita.</span>
           </div>
 
-          <div className="flex items-center gap-1.5 text-emerald-400 font-medium">
+          <div className="flex items-center gap-1.5 text-emerald-400 font-medium shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             <span>Sinkron otomatis</span>
           </div>

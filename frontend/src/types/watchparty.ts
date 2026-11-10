@@ -9,8 +9,8 @@ export interface Participant {
   playerStatus: PlayerStatus
   connected: boolean
   joinedAtMs: number
-  avatarText: string
-  avatarColor: string
+  avatarText?: string
+  avatarColor?: string
   activityStatus?: string // e.g. "Berbicara", "Menyimak", "Terhubung"
   isSpeaking?: boolean
 }
@@ -32,16 +32,14 @@ export interface ChatMessage {
   reactions?: ChatReaction[]
 }
 
-export type EmojiType = 'thumbsUp' | 'heart' | 'laugh' | 'wow' | 'sad' | 'fire' | 'clap'
+export type EmojiType = 'thumbsUp' | 'heart' | 'laugh' | 'wow' | 'sad'
 
-export const EMOJI_MAP: Record<string, string> = {
+export const EMOJI_MAP: Record<EmojiType, string> = {
   thumbsUp: '👍',
   heart: '❤️',
-  fire: '🔥',
   laugh: '😂',
   wow: '😮',
   sad: '😢',
-  clap: '👏',
 }
 
 export interface PlaybackState {

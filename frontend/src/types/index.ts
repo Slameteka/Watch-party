@@ -1,43 +1,16 @@
-export type Role = 'host' | 'controller' | 'viewer'
+export type {
+  Role,
+  PlayerStatus,
+  Participant,
+  ChatMessage,
+  ChatReaction,
+  EmojiType,
+  PlaybackState,
+  RoomItem,
+  FriendItem,
+} from './watchparty'
 
-export type PlayerStatus = 'unknown' | 'buffering' | 'syncing' | 'ready'
-
-export interface Participant {
-  participantId: string
-  displayName: string
-  role: Role
-  playerStatus: PlayerStatus
-  connected: boolean
-  joinedAtMs: number
-}
-
-export interface ChatMessage {
-  messageId: string
-  participantId: string
-  displayName: string
-  text: string
-  createdAtMs: number
-}
-
-export type EmojiType = 'thumbsUp' | 'heart' | 'laugh' | 'wow' | 'sad'
-
-export const EMOJI_MAP: Record<EmojiType, string> = {
-  thumbsUp: '👍',
-  heart: '❤️',
-  laugh: '😂',
-  wow: '😮',
-  sad: '😢',
-}
-
-export interface PlaybackState {
-  roomId: string
-  mediaId: string
-  status: 'playing' | 'paused'
-  positionSec: number
-  playbackRate: number
-  updatedAtServerMs: number
-  version: number
-}
+export { EMOJI_MAP } from './watchparty'
 
 export interface RoomInfo {
   roomId: string
