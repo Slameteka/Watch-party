@@ -33,6 +33,7 @@ resource "aws_lambda_function" "ws_authorizer" {
 
   environment {
     variables = {
+      PYTHONPATH              = "/var/task/src"
       MAIN_TABLE_NAME         = var.main_table_name
       ROOM_TOKEN_SECRET_NAME  = "/${var.project_name}/${var.env}/room-token-signing-key"
       APP_ORIGIN              = "https://${var.app_domain}"
@@ -69,6 +70,7 @@ resource "aws_lambda_function" "ws_connect" {
 
   environment {
     variables = {
+      PYTHONPATH              = "/var/task/src"
       MAIN_TABLE_NAME         = var.main_table_name
       CONNECTIONS_TABLE_NAME  = var.connections_table_name
       ROOM_TOKEN_SECRET_NAME  = "/${var.project_name}/${var.env}/room-token-signing-key"
@@ -107,6 +109,7 @@ resource "aws_lambda_function" "ws_disconnect" {
 
   environment {
     variables = {
+      PYTHONPATH              = "/var/task/src"
       MAIN_TABLE_NAME         = var.main_table_name
       CONNECTIONS_TABLE_NAME  = var.connections_table_name
       ROOM_TOKEN_SECRET_NAME  = "/${var.project_name}/${var.env}/room-token-signing-key"
@@ -145,6 +148,7 @@ resource "aws_lambda_function" "ws_message" {
 
   environment {
     variables = {
+      PYTHONPATH              = "/var/task/src"
       MAIN_TABLE_NAME         = var.main_table_name
       CONNECTIONS_TABLE_NAME  = var.connections_table_name
       ROOM_TOKEN_SECRET_NAME  = "/${var.project_name}/${var.env}/room-token-signing-key"
