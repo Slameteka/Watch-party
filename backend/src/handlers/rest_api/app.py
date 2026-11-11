@@ -196,7 +196,7 @@ def join_room(room_id: str) -> dict[str, Any]:
                 room_token_expires_at_ms=exp_ms,
                 ws_url=WS_URL,
             ).model_dump(by_alias=True)
-        except (ForbiddenError, NotFoundError):
+        except ForbiddenError, NotFoundError:
             pass
 
     # Guest join (viewer)
