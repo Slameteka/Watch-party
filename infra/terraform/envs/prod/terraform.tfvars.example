@@ -1,0 +1,6 @@
+project_name          = "watchparty"
+env                   = "prod"
+aws_region            = "ap-southeast-1"
+app_domain            = "watchparty.chescloud.my.id"
+room_max_participants = 10
+tags                  = {}

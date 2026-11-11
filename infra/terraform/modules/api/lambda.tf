@@ -27,6 +27,7 @@ resource "aws_lambda_function" "rest_api" {
 
   environment {
     variables = {
+      PYTHONPATH                  = "/var/task/src"
       MAIN_TABLE_NAME             = var.main_table_name
       CONNECTIONS_TABLE_NAME      = var.connections_table_name
       ROOM_MAX_PARTICIPANTS       = tostring(var.room_max_participants)

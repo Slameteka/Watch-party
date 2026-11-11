@@ -31,6 +31,38 @@ Aturan:
 - Biaya bulan berjalan: $__ | Sisa credits: $__ | Alert budget terakhir: __%
 ```
 
+## 2026-11-11 (Rabu)
+
+**Selesai**
+- [Platform / Backend] Provisioning dan deployment penuh infrastruktur backend ke AWS prod (`ap-southeast-1`) via root module Terraform `infra/terraform/envs/prod/`:
+  - DynamoDB: tabel `watchparty-prod-main` (PK/SK, on-demand, TTL `expiresAt`) dan `watchparty-prod-connections` (PK `connectionId`, GSI `byRoom`, TTL `expiresAt`).
+  - Cognito: User Pool `watchparty-prod-user-pool`, User Pool Client `watchparty-prod-web-client`, dan domain host `watchparty-prod-auth`.
+  - HTTP API Gateway v2: ID `8idyfamh69`, stage `$default` dengan integrasi Lambda `watchparty-prod-rest-api` dan Cognito JWT Authorizer pada rute terproteksi.
+  - WebSocket API Gateway v2: ID `bwb0eqn7ee`, stage `prod` dengan rute `$connect`, `$disconnect`, `$default`, integrasi Lambda handler, serta access log ke CloudWatch Logs.
+  - Setup IAM role akun untuk API Gateway push logs ke CloudWatch (`watchparty-prod-apigateway-cloudwatch-role`).
+  - 5 fungsi Lambda Python 3.14 (arm64): `rest-api`, `ws-authorizer`, `ws-connect`, `ws-disconnect`, `ws-message`.
+- [Backend] Pemecahan masalah runtime Lambda dan penyelarasan lingkungan live:
+  - Penambahan environment variable `PYTHONPATH = "/var/task/src"` pada seluruh 5 fungsi Lambda di Terraform (`modules/api/lambda.tf` & `modules/realtime/lambda.tf`), menuntaskan isu import `from core...` dan `from handlers...`.
+  - Perbaikan syntax multi-exception clause di `backend/src/handlers/rest_api/app.py`.
+  - Rebuild paket distribusi Lambda zip (`backend/dist/`).
+- [Backend] Verifikasi & audit live API di cloud:
+  - `GET /health` -> 200 OK (`{"status":"ok"}`).
+  - `GET /catalog` -> 200 OK mengembalikan 3 item film default (*Sintel*, *Big Buck Bunny*, *Tears of Steel*).
+  - `POST /rooms` -> 401 Unauthorized (Cognito JWT authorizer memblokir akses tanpa token).
+  - `POST /rooms/{id}/join` -> 404 Not Found (error handling DynamoDB bekerja).
+  - WebSocket handshake tanpa token -> 401 Unauthorized (Lambda REQUEST authorizer memblokir koneksi tidak valid).
+
+**Keputusan + alasan**
+- Mengonfigurasi `PYTHONPATH = "/var/task/src"` via environment variable Lambda Terraform dibanding merestrukturisasi direktori build, agar tetap konsisten dengan struktur direktori `src/` dan konfigurasi `pyproject.toml`.
+
+**Blocker**
+- Menunggu delegasi 4 record NS Route 53 ke Cloudflare DNS untuk domain `watchparty.chescloud.my.id`.
+
+**Berikutnya**
+- [Frontend / Backend] Integrasi koneksi WebSocket client dari frontend ke API Gateway WebSocket live.
+
+---
+
 ## 2026-11-10 (Selasa)
 
 **Selesai**
