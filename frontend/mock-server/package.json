@@ -1,0 +1,21 @@
+{
+  "name": "mock-server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Mock WebSocket server for frontend development (protocol v1)",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node selftest.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "ws": "^8.22.2"
+  },
+  "devDependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1"
+  }
+}
