@@ -31,6 +31,32 @@ Aturan:
 - Biaya bulan berjalan: $__ | Sisa credits: $__ | Alert budget terakhir: __%
 ```
 
+## 2026-11-19 (Kamis)
+
+**Selesai**
+- [RTC/Media] Pipeline HLS di `media/`: `scripts/publish_media.py` dengan 4 langkah (`transcode` lewat ffmpeg Docker yang di-pin, `verify`, `upload` ke media bucket dengan `Content-Type` dan `Cache-Control: immutable`, `register` item katalog). `catalog.json` berisi 3 film dengan lisensi, atribusi resmi, dan SHA-256 file sumber. 22 unit test lulus (pytest + moto), `ruff check` dan `ruff format --check` bersih. Workflow CI baru `.github/workflows/media-ci.yml`. Dokumentasi di [media/README.md](../media/README.md).
+- [RTC/Media] Transcode Sintel, Tears of Steel, dan Big Buck Bunny dengan script baru dimulai di laptop RTC/Media (±0,18× real-time). Hasil verifikasi dicatat setelah selesai.
+- [RTC/Media] Key pair RSA 2048 untuk CloudFront signed cookies dibuat. Public key di `infra/terraform/modules/edge/keys/`. Private key disimpan di luar repo dan belum masuk SSM.
+- [RTC/Media + Platform] Modul baru `infra/terraform/modules/edge`: web bucket dan media bucket privat (OAC), public key + key group, behavior `/media/*` (signed cookies wajib), `/posters/*` (publik), CloudFront Function SPA routing, response headers keamanan, record alias apex opsional, dan policy IAM `media-publisher`. `terraform fmt -check` dan `validate` lulus (Terraform 1.17.1, provider AWS 6.73.0), `tflint` v0.66.0 tanpa temuan (termasuk ruleset AWS 0.50.0). Modul belum dipasang di `envs/prod`.
+- [RTC/Media] Delegasi DNS `watchparty.chescloud.my.id` sudah aktif: `dig NS` (19 Nov) mengembalikan 4 nameserver `awsdns`. Blocker delegasi NS di entri 9–11 Nov sudah tidak berlaku.
+
+**Keputusan + alasan**
+- Ladder memakai lebar tetap (640/854/1280/1920 px) dan tinggi mengikuti sumber — Sintel (1920×818) dan Tears of Steel (1920×800) lebih lebar dari 16:9, jadi tidak perlu letterbox atau upscale ([architecture.md §5.4](architecture.md#54-pipeline-media)).
+- Item katalog menulis `posterPath`/`playbackPath`/`sortOrder` sesuai architecture.md §7.2, ditambah `posterUrl`/`playbackUrl` untuk sementara — `RoomRepository` backend masih membaca URL lengkap.
+- `/media/*` dan `/posters/*` memakai managed cache policy `CachingOptimizedForUncompressedObjects` — cache key tanpa cookie, query string, dan header, sehingga semua peserta memakai cache yang sama (NFR-1.8). Tanpa custom error response agar 403 film tidak berubah menjadi HTML (ADR-0005).
+- Public key (PR2) dan modul `edge` (PR3) masuk satu PR — modul membaca file public key, jadi PR2 sendirian tidak bisa divalidasi.
+
+**Blocker**
+- Private key CloudFront belum di SSM `/watchparty/prod/cloudfront-signing-private-key` — Platform — user `media-engineer` hanya punya SSM read-only, jadi Platform menjalankan `put-parameter` atau memberi izin untuk parameter ini.
+- Modul `edge` belum bisa di-apply dengan domain asli — Platform — butuh sertifikat ACM `us-east-1` (modul `dns`) dan wiring di `envs/prod/main.tf` (contoh ada di README modul).
+- Upload film dan registrasi katalog belum bisa dijalankan — Platform — policy `media-publisher` perlu di-attach ke grup `watchparty-rtc-media` setelah modul `edge` di-apply.
+- Algoritma signature signed cookies (SHA-1 dengan 3 cookie, atau SHA-256 dengan cookie tambahan `CloudFront-Hash-Algorithm`) — Lead + Backend + RTC/Media — dibutuhkan sebelum handler `media-cookies` ditulis.
+
+**Berikutnya**
+- [RTC/Media] Verifikasi hasil transcode 3 film; upload dan register setelah `edge` di-apply; handler `media-cookies` dan perbaikan `rtc-token` bersama Backend; modul `rtc` (LiveKit di EC2).
+
+---
+
 ## 2026-11-11 (Rabu)
 
 **Selesai**
@@ -127,6 +153,24 @@ Aturan:
 
 **Berikutnya**
 - Integrasi WebSocket client ke store sosial dan pemutar HLS.
+
+---
+
+## 2026-11-08 (Minggu)
+
+**Selesai**
+- [RTC/Media] Verifikasi lisensi 3 film: Big Buck Bunny, Sintel, dan Tears of Steel berlisensi CC BY 3.0 (logo dikecualikan). Sumber: peach.blender.org, durian.blender.org/sharing, mango.blender.org/sharing. Sintel wajib menyertakan seluruh credit scroll saat diputar.
+- [RTC/Media] LiveKit lokal untuk development: `livekit/livekit-server:v1.13.11` (tag di-pin) mode dev + LiveKit CLI v2.19.3. Uji 3 peserta di satu room: video/audio diteruskan SFU, simulcast aktif, peserta dengan kamera dan mic mati tetap melihat dan mendengar peserta lain.
+- [RTC/Media] Uji pipeline HLS dengan Big Buck Bunny (596 s): 4 rendition 360p/480p/720p/1080p (rata-rata ~0,9/1,5/2,9/5,0 Mbps), fMP4, segmen 4 s, keyframe setiap 2 s sejajar di semua rendition, total 733 MB. Diputar dengan hls.js 1.7.4: pindah kualitas manual dan seek berjalan.
+
+**Keputusan + alasan**
+- Transcode memakai image Docker `linuxserver/ffmpeg:9.0.2-cli-ls89` — `ffmpeg-free` di Fedora tidak punya encoder libx264, dan image yang di-pin memberi hasil yang sama di semua laptop anggota.
+
+**Blocker**
+- Tidak ada (status akun AWS dan modul fondasi ditanyakan ke Platform).
+
+**Berikutnya**
+- [RTC/Media] Uji ABR otomatis dengan throttling ~1 Mbps (AC-2.3.1); transcode Sintel dan Tears of Steel; script `publish_media.py`.
 
 ---
 
