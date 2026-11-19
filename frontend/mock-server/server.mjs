@@ -447,10 +447,93 @@ export function createMockServer({
     }
   }
 
-  const httpServer = createServer((_request, response) => {
-    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
-    response.end('Watch Party mock WebSocket server. Connect with ws://<host>/?token=host\n')
-  })
+  // Minimal REST so the frontend can run the whole join flow (openapi.yaml: joinRoom,
+  // refreshSession, issueMediaCookies). Mock-only: "?role=" on join picks the role.
+  function handleRest(request, response) {
+    const url = new URL(request.url ?? '/', 'http://localhost')
+    const origin = request.headers.origin
+    const cors = {
+      ...(origin ? { 'access-control-allow-origin': origin, vary: 'Origin' } : {}),
+      'access-control-allow-credentials': 'true',
+      'access-control-allow-headers': 'content-type, authorization',
+      'access-control-allow-methods': 'GET, POST, OPTIONS',
+    }
+    const json = (status, body) => {
+      response.writeHead(status, { ...cors, 'content-type': 'application/json; charset=utf-8' })
+      response.end(JSON.stringify(body))
+    }
+    const fail = (status, code, message) => json(status, { error: { code, message } })
+
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204, cors)
+      response.end()
+      return
+    }
+
+    const route = url.pathname.match(/^\/rooms\/([^/]+)\/(join|session\/refresh|media-cookies)$/)
+    if (request.method === 'GET' && url.pathname === '/health') {
+      json(200, { status: 'ok' })
+      return
+    }
+    if (request.method !== 'POST' || !route) {
+      response.writeHead(200, { ...cors, 'content-type': 'text/plain; charset=utf-8' })
+      response.end('Watch Party mock server. REST: POST /rooms/{id}/join. WebSocket: /?token=host\n')
+      return
+    }
+    if (route[1] !== ROOM_ID) {
+      fail(404, 'NOT_FOUND', `Room '${route[1]}' not found. The mock only has '${ROOM_ID}'.`)
+      return
+    }
+
+    let body = ''
+    request.on('data', (chunk) => {
+      body += chunk
+    })
+    request.on('end', () => {
+      const bearer = /^Bearer (.+)$/.exec(request.headers.authorization ?? '')
+      if (route[2] === 'media-cookies') {
+        if (!bearer) return fail(401, 'UNAUTHORIZED', 'Missing room token.')
+        // The real backend sets CloudFront cookies here. The mock has nothing to protect.
+        response.writeHead(204, cors)
+        response.end()
+        return
+      }
+
+      let identity
+      if (route[2] === 'join') {
+        let parsed
+        try {
+          parsed = JSON.parse(body || '{}')
+        } catch {
+          return fail(400, 'VALIDATION_ERROR', 'Body is not valid JSON.')
+        }
+        const name = typeof parsed.displayName === 'string' ? parsed.displayName.trim() : ''
+        if (!name || name.length > 32 || Object.keys(parsed).some((key) => key !== 'displayName')) {
+          return fail(400, 'VALIDATION_ERROR', 'displayName (1-32 chars) is required.')
+        }
+        const role = ROLES.includes(url.searchParams.get('role')) ? url.searchParams.get('role') : 'viewer'
+        identity = { role, name: name.replaceAll('-', ' ') }
+      } else {
+        if (!bearer) return fail(401, 'UNAUTHORIZED', 'Missing room token.')
+        const known = identityFromToken(bearer[1])
+        identity = { role: known.role, name: known.displayName }
+      }
+
+      const roomToken = `${identity.role}-${identity.name}`
+      const session = identityFromToken(roomToken)
+      json(200, {
+        roomId: ROOM_ID,
+        participantId: session.participantId,
+        displayName: session.displayName,
+        role: session.role,
+        roomToken,
+        roomTokenExpiresAtMs: Date.now() + 4 * 60 * 60 * 1000,
+        wsUrl: `ws://${request.headers.host ?? `localhost:${DEFAULT_PORT}`}`,
+      })
+    })
+  }
+
+  const httpServer = createServer(handleRest)
   const wss = new WebSocketServer({ server: httpServer })
   wss.on('connection', onConnect)
 

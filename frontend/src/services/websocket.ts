@@ -1,32 +1,46 @@
 import type { EmojiType, WsEnvelope } from '../types'
 
 export type WsMessageCallback = (msg: WsEnvelope<any>) => void
+export type WsCloseCallback = (event: { code: number; reason: string; wasOpen: boolean }) => void
 
 export class WebSocketClient {
   private ws: WebSocket | null = null
   private url: string = ''
   private listeners: Set<WsMessageCallback> = new Set()
+  private closeListeners: Set<WsCloseCallback> = new Set()
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null
   private lastMessageSentMs: number = Date.now()
 
   public isConnected: boolean = false
 
-  connect(baseUrl: string, token: string): Promise<void> {
+  /**
+   * Open the WebSocket and send `session.resume` as soon as it is open.
+   * Resolves when open. Rejects if the connection fails before it opens.
+   * `resumePayload` is `{ lastVersion }` on reconnect (ws-messages.md §5.2).
+   */
+  connect(
+    baseUrl: string,
+    token: string,
+    resumePayload: { lastVersion?: number } = {}
+  ): Promise<void> {
     const separator = baseUrl.includes('?') ? '&' : '?'
     this.url = `${baseUrl}${separator}token=${encodeURIComponent(token)}`
 
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(this.url)
+        const ws = new WebSocket(this.url)
+        this.ws = ws
+        let wasOpen = false
 
-        this.ws.onopen = () => {
+        ws.onopen = () => {
+          wasOpen = true
           this.isConnected = true
           this.startHeartbeat()
-          this.send('session.resume', {})
+          this.send('session.resume', resumePayload)
           resolve()
         }
 
-        this.ws.onmessage = (event) => {
+        ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data) as WsEnvelope<any>
             this.notifyListeners(data)
@@ -35,13 +49,23 @@ export class WebSocketClient {
           }
         }
 
-        this.ws.onerror = (err) => {
+        ws.onerror = (err) => {
           console.warn('WebSocket error:', err)
         }
 
-        this.ws.onclose = () => {
+        ws.onclose = (event) => {
+          // Ignore events of an old socket that was already replaced.
+          if (this.ws !== ws) return
           this.isConnected = false
           this.stopHeartbeat()
+          if (!wasOpen) reject(new Error('WebSocket closed before it opened'))
+          this.closeListeners.forEach((cb) => {
+            try {
+              cb({ code: event.code, reason: event.reason, wasOpen })
+            } catch (e) {
+              console.error('Error in WS close listener:', e)
+            }
+          })
         }
       } catch (err) {
         reject(err)
@@ -52,6 +76,8 @@ export class WebSocketClient {
   disconnect() {
     this.stopHeartbeat()
     if (this.ws) {
+      // Detach first so an intentional close does not look like a lost connection.
+      this.ws.onclose = null
       this.ws.close()
       this.ws = null
     }
@@ -106,6 +132,14 @@ export class WebSocketClient {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval)
       this.heartbeatInterval = null
+    }
+  }
+
+  /** Called when an open connection closes (not after `disconnect()`). */
+  onClose(cb: WsCloseCallback): () => void {
+    this.closeListeners.add(cb)
+    return () => {
+      this.closeListeners.delete(cb)
     }
   }
 

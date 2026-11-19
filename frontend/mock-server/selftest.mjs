@@ -360,6 +360,52 @@ await step('connection without token is closed', async () => {
   await client.waitClosed()
 })
 
+await step('REST: join returns RoomSession, the token works on the WebSocket', async () => {
+  const httpUrl = `http://localhost:${server.port}`
+  const response = await fetch(`${httpUrl}/rooms/MockRoom0001/join?role=controller`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: 'http://localhost:5173' },
+    body: JSON.stringify({ displayName: 'Dina' }),
+  })
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('access-control-allow-origin'), 'http://localhost:5173')
+  assert.equal(response.headers.get('access-control-allow-credentials'), 'true')
+  const session = await response.json()
+  assert.deepEqual(Object.keys(session).sort(), [
+    'displayName', 'participantId', 'role', 'roomId', 'roomToken', 'roomTokenExpiresAtMs', 'wsUrl',
+  ])
+  assert.equal(session.role, 'controller')
+  assert.equal(session.displayName, 'Dina')
+
+  const client = await connect(session.roomToken)
+  client.send('session.resume', {})
+  const snapshot = await client.waitFor((m) => m.type === 'room.snapshot')
+  assert.equal(snapshot.payload.self.participantId, session.participantId)
+  assert.equal(snapshot.payload.self.role, 'controller')
+})
+
+await step('REST: validation, unknown room, media-cookies, refresh', async () => {
+  const httpUrl = `http://localhost:${server.port}`
+  const post = (path, init = {}) => fetch(`${httpUrl}${path}`, { method: 'POST', ...init })
+
+  const empty = await post('/rooms/MockRoom0001/join', { body: '{}' })
+  assert.equal(empty.status, 400)
+  const unknown = await post('/rooms/Nope/join', { body: JSON.stringify({ displayName: 'A' }) })
+  assert.equal(unknown.status, 404)
+
+  assert.equal((await post('/rooms/MockRoom0001/media-cookies')).status, 401)
+  const cookies = await post('/rooms/MockRoom0001/media-cookies', {
+    headers: { authorization: 'Bearer viewer-bimo' },
+  })
+  assert.equal(cookies.status, 204)
+
+  const refreshed = await post('/rooms/MockRoom0001/session/refresh', {
+    headers: { authorization: 'Bearer host-raka' },
+  })
+  assert.equal(refreshed.status, 200)
+  assert.equal((await refreshed.json()).role, 'host')
+})
+
 await step('every server message matched ws-messages.schema.json', async () => {
   assert.equal(
     schemaErrors.length,

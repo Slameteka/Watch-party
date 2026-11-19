@@ -73,3 +73,15 @@ Berdasarkan pembacaan kode `backend/` di commit `79da098`. Mock mengikuti **kont
 | Rate limit | Ada (§3) | Tidak ada pembatasan di handler `ws_message` |
 
 Sebelum backend terpasang di AWS, selisih ini perlu dikonfirmasi ke Backend.
+
+## REST palsu (untuk alur join)
+
+Server yang sama juga menjawab tiga endpoint REST di port yang sama (`http://localhost:8787`), supaya FE bisa menjalankan alur join penuh:
+
+| Endpoint | Hasil |
+|---|---|
+| `POST /rooms/MockRoom0001/join` body `{"displayName": "Dina"}` | `RoomSession` (`roomToken`, `wsUrl`, dst). Tambahkan `?role=host` atau `?role=controller` untuk memilih peran (hanya di mock; backend asli mengabaikannya). |
+| `POST /rooms/MockRoom0001/session/refresh` header `Authorization: Bearer <roomToken>` | `RoomSession` baru |
+| `POST /rooms/MockRoom0001/media-cookies` header `Authorization: Bearer <roomToken>` | `204`, tanpa cookie (mock tidak punya CloudFront) |
+
+CORS mengizinkan origin mana pun dengan `credentials`, jadi `fetch(..., { credentials: 'include' })` dari `localhost:5173` jalan.
