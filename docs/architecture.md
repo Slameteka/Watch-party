@@ -315,17 +315,18 @@ flowchart LR
     CFP --> PL
 ```
 
-| Rendition | Resolusi | Video bitrate (target) | Audio |
+| Rendition | Lebar (tinggi mengikuti sumber) | Video bitrate (target) | Audio |
 |---|---|---|---|
-| 360p | 640×360 | ~800 kbps | AAC 128 kbps (semua rendition) |
-| 480p | 854×480 | ~1.400 kbps | |
-| 720p | 1280×720 | ~2.800 kbps | |
-| 1080p | 1920×1080 | ~5.000 kbps | |
+| 360p | 640 px (16:9: 640×360) | ~800 kbps | AAC 128 kbps stereo (semua rendition) |
+| 480p | 854 px | ~1.400 kbps | |
+| 720p | 1280 px | ~2.800 kbps | |
+| 1080p | 1920 px | ~5.000 kbps | |
 
 - Codec H.264 + AAC, segmen HLS 4 detik, keyframe setiap 2 detik (seek lebih presisi). Kontainer segmen: fMP4 (didukung hls.js dan Safari).
+- Lebar rendition tetap dan tinggi mengikuti aspect ratio sumber, karena Sintel (1920×818) dan Tears of Steel (1920×800) lebih lebar dari 16:9. Rendition yang lebih lebar dari sumber tidak dibuat.
 - `Cache-Control: public, max-age=31536000, immutable` untuk playlist dan segmen (konten VOD tidak berubah). Jika film diganti, pakai `mediaId` baru.
-- Script dijalankan oleh RTC/Media dengan kredensial IAM user + MFA. Detail opsi ffmpeg ada di README script (dibuat saat implementasi).
-- Film awal: *Big Buck Bunny*, *Sintel*, *Tears of Steel* (Blender Foundation, Creative Commons Attribution). Atribusi ditampilkan di katalog.
+- Script dijalankan oleh RTC/Media dengan kredensial IAM user + MFA dan policy `<project_name>-<env>-media-publisher` (modul `edge`). ffmpeg dijalankan dari image Docker yang di-pin (`linuxserver/ffmpeg`), karena paket ffmpeg distro bisa tidak punya `libx264`. Detail opsi ffmpeg ada di [media/README.md](../media/README.md).
+- Film awal: *Big Buck Bunny*, *Sintel*, *Tears of Steel* (Blender Foundation, Creative Commons Attribution 3.0). Atribusi ditampilkan di katalog. Metadata film ada di `media/catalog.json`.
 
 ## 6. Model Sinkronisasi
 
@@ -415,6 +416,7 @@ Nilai `expiresAt` (epoch detik) untuk item room:
 - Saat dibuat: `createdAtMs / 1000` + 48 jam (masa hidup 24 jam + retensi 24 jam).
 - Saat host menutup room (v1.1): `closedAtMs / 1000` + 24 jam.
 - Item katalog tidak punya `expiresAt`.
+- Item katalog ditulis oleh `media/scripts/publish_media.py register`. Untuk sementara script juga menulis `posterUrl` dan `playbackUrl` (URL lengkap), karena `RoomRepository` di backend masih membaca atribut itu. Keduanya dihapus setelah backend membangun URL dari `posterPath` dan `playbackPath`.
 
 Akhir masa hidup room (`Room.expiresAtMs` di kontrak) = `createdAtMs` + 24 jam. Nilai ini tidak disimpan terpisah, tetapi dihitung dari `createdAtMs`.
 

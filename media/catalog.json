@@ -1,0 +1,49 @@
+{
+  "items": [
+    {
+      "mediaId": "big-buck-bunny",
+      "title": "Big Buck Bunny",
+      "description": "A large and lovable rabbit deals with bullying forest creatures in this classic open animation.",
+      "sortOrder": 1,
+      "license": "CC BY 3.0",
+      "licenseUrl": "https://peach.blender.org/about/",
+      "attribution": "(c) copyright 2008, Blender Foundation / www.bigbuckbunny.org",
+      "posterAtSec": 120,
+      "source": {
+        "url": "http://download.blender.org/peach/bigbuckbunny_movies/big_buck_bunny_1080p_h264.mov.zip",
+        "fileName": "big_buck_bunny_1080p_h264.mov",
+        "sha256": "dc2146a2b1172def56730143ad80cd1825b7fad15f1fc9c23a4e7d01a741ac11"
+      }
+    },
+    {
+      "mediaId": "sintel",
+      "title": "Sintel",
+      "description": "A lonely young woman, Sintel, helps and befriends a baby dragon she calls Scales.",
+      "sortOrder": 2,
+      "license": "CC BY 3.0",
+      "licenseUrl": "https://durian.blender.org/sharing/",
+      "attribution": "© copyright Blender Foundation | durian.blender.org",
+      "posterAtSec": 120,
+      "source": {
+        "url": "https://download.blender.org/durian/movies/Sintel.2010.1080p.mkv",
+        "fileName": "Sintel.2010.1080p.mkv",
+        "sha256": "97f1dbc66231df42ad49bd8c29aa174b8f48933058e47e7157d4ba63d93a8efa"
+      }
+    },
+    {
+      "mediaId": "tears-of-steel",
+      "title": "Tears of Steel",
+      "description": "Set in a dystopian future, a group of warriors and scientists gather at the Oude Kerk in Amsterdam.",
+      "sortOrder": 3,
+      "license": "CC BY 3.0",
+      "licenseUrl": "https://mango.blender.org/sharing/",
+      "attribution": "(CC) Blender Foundation | mango.blender.org",
+      "posterAtSec": 200,
+      "source": {
+        "url": "https://download.blender.org/demo/movies/ToS/tears_of_steel_1080p.mov.zip",
+        "fileName": "tears_of_steel_1080p.mov",
+        "sha256": "99486359be7e3681168a0fe94e1cbb0284c48b57b2a3ce7df4fa75e185987a15"
+      }
+    }
+  ]
+}
