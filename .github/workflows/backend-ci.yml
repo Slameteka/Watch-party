@@ -91,6 +91,11 @@ jobs:
           terraform -chdir=infra/terraform/modules/realtime init -backend=false
           terraform -chdir=infra/terraform/modules/realtime validate
 
+      - name: Validate Module edge
+        run: |
+          terraform -chdir=infra/terraform/modules/edge init -backend=false
+          terraform -chdir=infra/terraform/modules/edge validate
+
   lambda-build:
     name: Lambda Packaging Verification
     runs-on: ubuntu-latest
