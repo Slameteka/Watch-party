@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { LeftSidebar } from './components/LeftSidebar'
 import { CenterTheater } from './components/CenterTheater'
 import { RightSidebar } from './components/RightSidebar'
+import { useRoomSession } from './session/useRoomSession'
 
 export function App() {
+  useRoomSession()
   const [activeRoomId, setActiveRoomId] = useState('malam-minggu')
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 

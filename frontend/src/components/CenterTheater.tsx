@@ -12,22 +12,12 @@ import {
   Mic,
   MicOff,
   MoreHorizontal,
-  Pause,
-  Play,
-  RotateCcw,
   Smile,
   UserPlus,
   VideoOff,
-  Volume2,
 } from 'lucide-react'
-import {
-  FullscreenIcon,
-  LogoTv,
-  PipIcon,
-  RadioBroadcastIcon,
-  SoundWaveIcon,
-  SubtitlesIcon,
-} from './Icons'
+import { LogoTv, RadioBroadcastIcon, SoundWaveIcon } from './Icons'
+import { WatchPlayer } from '../player/WatchPlayer'
 
 interface CenterTheaterProps {
   onInvite?: () => void
@@ -42,10 +32,8 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
   onToggleRightSidebar,
   isRightSidebarOpen = false,
 }) => {
-  const [isPlaying, setIsPlaying] = useState(true)
   const [isMicActive, setIsMicActive] = useState(true)
   const [isCameraActive, setIsCameraActive] = useState(false)
-  const [volume, setVolume] = useState(70)
 
   // Floating reactions simulation
   const [reactions, setReactions] = useState<{ id: number; emoji: string }[]>([
@@ -144,15 +132,8 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
 
         {/* 3. The Video Player Screen */}
         <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-black border border-[#1e222e] shadow-2xl group">
-          {/* High-fidelity Sunset Roadtrip Camper Van Scene */}
-          <img
-            src="https://images.unsplash.com/photo-1523987355523-c7b5b0dd90a7?auto=format&fit=crop&w=1600&q=80"
-            alt="Film Scene"
-            className="w-full h-full object-cover brightness-[0.88]"
-          />
-
-          {/* Vignette Gradients */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-black/35 pointer-events-none" />
+          {/* Real player: plays the room's movie and follows the room state (FE-Player). */}
+          <WatchPlayer />
 
           {/* Watermark Branding inside video */}
           <div className="absolute top-4 left-5 flex items-center gap-2 text-white/90 font-bold text-xs tracking-tight select-none">
@@ -163,15 +144,6 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
           <div className="absolute top-4 right-5 flex items-center gap-1.5 text-[11px] text-white/80 font-medium bg-black/40 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-white/10">
             <RadioBroadcastIcon className="w-3.5 h-3.5 text-white mr-0.5" />
             <span>6 orang · satu momen</span>
-          </div>
-
-          {/* Subtitles centered near bottom */}
-          <div className="absolute bottom-16 inset-x-0 flex flex-col items-center justify-center text-center px-4 pointer-events-none">
-            <p className="text-white text-sm md:text-base font-medium drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] max-w-xl leading-relaxed">
-              Kita nggak harus tahu tujuannya,
-              <br />
-              asal perginya bareng.
-            </p>
           </div>
 
           {/* Floating Reactions on video */}
@@ -188,75 +160,6 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
                 {r.emoji}
               </div>
             ))}
-          </div>
-
-          {/* Video Player Controls Bar */}
-          <div className="absolute bottom-0 inset-x-0 px-4 pb-2.5 pt-6 bg-gradient-to-t from-black/95 to-transparent flex flex-col gap-2">
-            {/* Timeline Progress Bar */}
-            <div className="relative w-full h-1 bg-white/20 rounded-full cursor-pointer group-hover:h-1.5 transition-all">
-              <div className="absolute top-0 left-0 h-full w-[39%] bg-white rounded-full" />
-            </div>
-
-            {/* Controls Row */}
-            <div className="flex items-center justify-between text-xs text-gray-300">
-              {/* Left Controls */}
-              <div className="flex items-center gap-2 sm:gap-3">
-                <button
-                  onClick={() => setIsPlaying(!isPlaying)}
-                  className="w-8 h-8 sm:w-6 sm:h-6 rounded-md bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
-                >
-                  {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-                </button>
-
-                <button
-                  className="p-1 hover:text-white transition-colors cursor-pointer shrink-0"
-                  title="Putar balik 10 detik"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                </button>
-
-                <div className="hidden sm:flex items-center gap-1.5 group/vol">
-                  <Volume2 className="w-3.5 h-3.5 text-gray-400 group-hover/vol:text-white" />
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={volume}
-                    onChange={(e) => setVolume(Number(e.target.value))}
-                    className="w-14 md:w-16 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
-                  />
-                </div>
-
-                <span className="text-[10px] sm:text-[11px] text-gray-400 font-mono shrink-0">
-                  42:18 / 1:48:32
-                </span>
-              </div>
-
-              {/* Right Controls */}
-              <div className="flex items-center gap-2 sm:gap-3">
-                <span className="text-[10px] sm:text-[11px] font-semibold text-gray-300 bg-white/10 px-1.5 py-0.5 rounded">
-                  1080p
-                </span>
-                <button
-                  className="p-1 hover:text-white transition-colors cursor-pointer"
-                  title="Subtitel"
-                >
-                  <SubtitlesIcon className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  className="hidden sm:block p-1 hover:text-white transition-colors cursor-pointer"
-                  title="Picture-in-picture"
-                >
-                  <PipIcon className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  className="p-1 hover:text-white transition-colors cursor-pointer"
-                  title="Layar Penuh"
-                >
-                  <FullscreenIcon className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
           </div>
         </div>
 
