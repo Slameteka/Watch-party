@@ -99,6 +99,9 @@ function freshContext(): Context {
 }
 
 let ctx = freshContext()
+// Bumped on every start/stop. An async step that wakes up in an older generation stops,
+// so React StrictMode (start, stop, start) never leaves two sessions running.
+let generation = 0
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -114,6 +117,7 @@ export interface StartSessionOptions {
 /** Join the room over REST, ask for media cookies, then open the WebSocket. */
 export async function startSession(options: StartSessionOptions): Promise<void> {
   stopSession()
+  const mine = generation
   const playback = usePlaybackStore.getState()
   playback.setConnection('connecting')
 
@@ -121,13 +125,15 @@ export async function startSession(options: StartSessionOptions): Promise<void> 
   try {
     session = await joinRoom(options.roomId, options.displayName, options.mockRole)
   } catch (error) {
-    failFromError(error)
+    if (mine === generation) failFromError(error)
     return
   }
+  if (mine !== generation) return
   ctx.session = session
   useSocialStore.getState().setSelf(session.participantId, session.role)
 
   await fetchMediaCookies()
+  if (mine !== generation) return
   ctx.cookieTimer = setInterval(() => void fetchMediaCookies(), MEDIA_COOKIE_REFRESH_MS)
 
   ctx.unsubscribe.push(wsClient.onMessage(handleServerMessage))
@@ -137,6 +143,7 @@ export async function startSession(options: StartSessionOptions): Promise<void> 
 
 /** Close everything and forget the session. */
 export function stopSession(): void {
+  generation += 1
   clearTimers()
   ctx.unsubscribe.forEach((off) => off())
   wsClient.disconnect()

@@ -85,3 +85,23 @@ Server yang sama juga menjawab tiga endpoint REST di port yang sama (`http://loc
 | `POST /rooms/MockRoom0001/media-cookies` header `Authorization: Bearer <roomToken>` | `204`, tanpa cookie (mock tidak punya CloudFront) |
 
 CORS mengizinkan origin mana pun dengan `credentials`, jadi `fetch(..., { credentials: 'include' })` dari `localhost:5173` jalan.
+
+## Menjalankan FE dengan mock (uji di browser)
+
+1. Terminal 1: `cd frontend/mock-server && npm start`
+2. Terminal 2: `cd frontend && npm run dev`
+3. Buka dua tab, satu per peran:
+   - Host: `http://localhost:5173/?name=Raka&role=host`
+   - Viewer: `http://localhost:5173/?name=Bimo&role=viewer`
+4. Host menekan play, jeda, geser timeline, atau putar balik 10 detik. Tab viewer ikut bergerak. Tombol viewer terkunci.
+
+Parameter alamat (sementara, sampai halaman join dibuat): `room` (default `MockRoom0001`), `name`, `role` (hanya dikenali mock).
+
+Variabel env FE (opsional, di `frontend/.env.local`):
+
+| Variabel | Fungsi |
+|---|---|
+| `VITE_API_URL` | Alamat REST API. Default `http://localhost:8787` (mock). |
+| `VITE_HLS_WITH_CREDENTIALS` | `true` bila video dilindungi CloudFront signed cookies. Biarkan kosong untuk stream uji publik. |
+
+Mock server menyimpan state selama prosesnya hidup. Restart (`Ctrl+C`, `npm start`) untuk kembali ke posisi 0 dan status paused.
