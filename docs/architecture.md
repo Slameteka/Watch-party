@@ -522,6 +522,9 @@ Semua Lambda: `logs:CreateLogStream`/`PutLogEvents` pada log group-nya, `xray:Pu
 
 Secret dibuat lewat CLI di runbook agar **nilainya tidak pernah masuk Terraform state maupun repo**. Terraform hanya mereferensikan nama parameter. Public key CloudFront boleh di-commit (bukan secret).
 
+- Lambda membaca secret **hanya** dari SSM lewat env `*_NAME` (modul `core.secret_store`). Tidak ada nilai cadangan di kode: secret yang hilang → 500 (fail closed). Nilai di-cache selama execution environment hidup; setelah rotasi, update konfigurasi Lambda atau deploy ulang.
+- EC2 LiveKit membaca key/secret LiveKit dari SSM setiap service start dan menulisnya ke file mode 0600 (`key_file`), bukan ke user data.
+
 ### 9.5 S3, CloudFront, Signed Cookies
 
 - Kedua bucket: Block Public Access aktif, enkripsi SSE-S3, bucket policy hanya mengizinkan service principal CloudFront dengan kondisi `AWS:SourceArn` = distribution ini (OAC).
@@ -534,6 +537,7 @@ Secret dibuat lewat CLI di runbook agar **nilainya tidak pernah masuk Terraform 
 | `/posters/*` | media bucket | Publik | Poster katalog |
 
 - Signed cookies memakai **custom policy** dengan `Resource = https://<project_name>.chescloud.my.id/media/<mediaId>/*` dan `DateLessThan = sekarang + 2 jam`, sehingga peserta hanya bisa mengakses film room-nya.
+- Signature RSA-SHA1, default CloudFront jika cookie keempat `CloudFront-Hash-Algorithm` tidak dikirim. SHA-256 butuh cookie keempat, jadi butuh perubahan kontrak (ADR-0005). Cookie tanpa `Expires`/`Max-Age` (saran AWS); masa berlaku ada di policy.
 - Atribut cookie: `Domain=<project_name>.chescloud.my.id; Path=/media/; Secure; HttpOnly; SameSite=Lax`. Cookie diset oleh `api.` untuk domain parent, sehingga request SPA wajib memakai `credentials: "include"` saat memanggil `POST /rooms/{roomId}/media-cookies`.
 
 ### 9.6 CORS
@@ -572,13 +576,19 @@ Ringkas dari [ADR-0007](adr/0007-authentication-model.md):
 
 | Port | Protokol | Fungsi |
 |---|---|---|
-| 80 | TCP | ACME HTTP-01 (Let's Encrypt) + redirect ke HTTPS |
+| 80 | TCP | ACME HTTP-01 (Let's Encrypt). Tidak ada redirect: hanya challenge server Caddy |
 | 443 | TCP | Caddy: signaling WSS `rtc.` dan TURN/TLS `turn.` (routing berdasarkan SNI) |
 | 7881 | TCP | ICE/TCP fallback |
 | 3478 | UDP | TURN/UDP (juga STUN) |
 | 50000–60000 | UDP | ICE/UDP media |
 
 Port mengikuti [dokumentasi LiveKit](https://docs.livekit.io/home/self-hosting/ports-firewall/). TURN/TLS harus di port 443 jika tidak memakai load balancer, sehingga dibutuhkan hostname terpisah `turn.` dan routing SNI di Caddy (pola deployment VM LiveKit). Sertifikat TLS dari Let's Encrypt (self-signed tidak diterima browser/WebRTC).
+
+Implementasi ([modul `rtc`](../infra/terraform/modules/rtc/README.md)):
+- ENI dibuat lebih dulu dan Elastic IP dipasang ke ENI, jadi instance sudah punya IP publik tetap saat boot pertama. `node_ip` LiveKit = EIP.
+- LiveKit dan Caddy (`livekit/caddyl4`) jalan sebagai dua unit systemd `docker run --network host`. Image di-pin dengan tag dan digest.
+- Caddy menerminasi TLS di 443: SNI `rtc.` → `localhost:7880`, SNI `turn.` → `<private ip>:5349` (LiveKit `turn.external_tls`).
+- Ganti versi atau konfigurasi = instance baru (`user_data_replace_on_change`); runbook: [runbooks/livekit.md](runbooks/livekit.md).
 
 ### 9.10 Privasi
 

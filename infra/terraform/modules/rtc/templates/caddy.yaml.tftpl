@@ -1,0 +1,43 @@
+# Caddy (layer4) config, same layout as livekit/generate: TLS on 443 is routed by SNI.
+# rtc.  -> LiveKit signaling (HTTP/WebSocket) on localhost:7880
+# turn. -> LiveKit TURN with external TLS on <private ip>:5349. The private IP (not
+#          localhost) keeps loopback out of TURN's XOR-MAPPED-ADDRESS, which Firefox rejects.
+# Certificates come from Let's Encrypt; port 80 must be open for the HTTP-01 challenge.
+logging:
+  logs:
+    default:
+      level: INFO
+storage:
+  module: file_system
+  root: /data
+apps:
+  tls:
+    certificates:
+      automate:
+        - ${rtc_domain}
+        - ${turn_domain}
+  layer4:
+    servers:
+      main:
+        listen: [":443"]
+        routes:
+          - match:
+              - tls:
+                  sni:
+                    - "${turn_domain}"
+            handle:
+              - handler: tls
+              - handler: proxy
+                upstreams:
+                  - dial: ["${private_ip}:5349"]
+          - match:
+              - tls:
+                  sni:
+                    - "${rtc_domain}"
+            handle:
+              - handler: tls
+                connection_policies:
+                  - alpn: ["http/1.1"]
+              - handler: proxy
+                upstreams:
+                  - dial: ["localhost:7880"]
