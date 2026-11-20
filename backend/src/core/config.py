@@ -52,11 +52,14 @@ API_URL: str = f"https://{API_DOMAIN}"
 WS_URL: str = f"wss://{WS_DOMAIN}"
 RTC_URL: str = f"wss://{RTC_DOMAIN}"
 
-# Secrets & Keys (parameter store or local dev default)
-ROOM_TOKEN_SECRET: str = getenv("ROOM_TOKEN_SECRET", "dev-secret-key-at-least-32-bytes-long!")
+# Media delivery and video chat (non-secret settings)
+# Signed cookies are scoped to the CloudFront domain (the app domain, architecture.md §9.5).
+MEDIA_DOMAIN: str = getenv("CLOUDFRONT_DOMAIN", APP_DOMAIN)
 CLOUDFRONT_KEY_PAIR_ID: str = getenv("CLOUDFRONT_KEY_PAIR_ID", "")
-CLOUDFRONT_PRIVATE_KEY_PEM: str = getenv("CLOUDFRONT_PRIVATE_KEY_PEM", "")
-LIVEKIT_API_KEY: str = getenv("LIVEKIT_API_KEY", "")
-LIVEKIT_API_SECRET: str = getenv("LIVEKIT_API_SECRET", "")
+LIVEKIT_URL: str = getenv("LIVEKIT_URL", RTC_URL)
+
+# Secrets are never read here. core.secret_store loads them from SSM Parameter Store
+# using the *_NAME environment variables set by Terraform.
+
 COGNITO_USER_POOL_ID: str = getenv("COGNITO_USER_POOL_ID", "")
 COGNITO_CLIENT_ID: str = getenv("COGNITO_CLIENT_ID", "")
