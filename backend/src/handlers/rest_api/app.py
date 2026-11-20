@@ -2,31 +2,35 @@
 
 import time
 import uuid
+from datetime import timedelta
 from typing import Any
 
 from aws_lambda_powertools import Logger
 from aws_lambda_powertools.event_handler import APIGatewayHttpResolver, CORSConfig, Response
+from aws_lambda_powertools.shared.cookies import Cookie, SameSite
 from pydantic import ValidationError as PydanticValidationError
 
+from core.auth.cloudfront import media_resource, sign_cookies
 from core.auth.token import issue_room_token, verify_room_token
 from core.catalog_data import DEFAULT_CATALOG_ITEMS
 from core.config import (
-    APP_DOMAIN,
     APP_URL,
-    LIVEKIT_API_KEY,
-    LIVEKIT_API_SECRET,
+    CLOUDFRONT_KEY_PAIR_ID,
     LIVEKIT_TOKEN_TTL_SEC,
-    RTC_URL,
+    LIVEKIT_URL,
+    MEDIA_COOKIES_TTL_SEC,
+    MEDIA_DOMAIN,
     WS_URL,
 )
 from core.errors import (
     ForbiddenError,
     NotFoundError,
+    RoomClosedError,
     UnauthorizedError,
     ValidationError,
     WatchPartyError,
 )
-from core.models.common import Role
+from core.models.common import Role, RoomStatus
 from core.models.rest import (
     CatalogResponse,
     CreateRoomRequest,
@@ -36,7 +40,14 @@ from core.models.rest import (
     RoomSession,
     RtcToken,
 )
+from core.models.room import Participant, Room
 from core.repository.room_repo import RoomRepository
+from core.secret_store import (
+    SecretNotConfiguredError,
+    cloudfront_private_key_pem,
+    livekit_api_credentials,
+    running_in_lambda,
+)
 
 logger = Logger(service="rest-api")
 
@@ -93,6 +104,20 @@ def extract_bearer_token() -> str:
     if not auth_header or not auth_header.startswith("Bearer "):
         raise UnauthorizedError("Missing or invalid Authorization header.")
     return auth_header[7:].strip()
+
+
+def require_active_participant(room_id: str) -> tuple[Room, Participant]:
+    """Authenticates the room token and loads an open room and a non-kicked participant.
+
+    Raises 401 (bad token), 403 (other room or kicked), 404 (unknown), 410 (room closed).
+    The role is always read from DynamoDB, never from the token.
+    """
+    claims = verify_room_token(extract_bearer_token(), expected_room_id=room_id)
+    room = room_repo.get_room_summary(room_id)
+    if room.status == RoomStatus.CLOSED:
+        raise RoomClosedError()
+    participant = room_repo.get_participant(room_id, claims.sub)
+    return room, participant
 
 
 # ==============================================================================
@@ -241,59 +266,75 @@ def refresh_session(room_id: str) -> dict[str, Any]:
 
 @app.post("/rooms/<room_id>/media-cookies")
 def issue_media_cookies(room_id: str) -> Response:
-    token = extract_bearer_token()
-    verify_room_token(token, expected_room_id=room_id)
+    """Sets CloudFront signed cookies for this room's film only (F-2.3, ADR-0005)."""
+    room, _ = require_active_participant(room_id)
 
-    # In local/mock mode, issue representative cookies
-    cookie_attrs = f"Domain={APP_DOMAIN}; Path=/media/; Secure; HttpOnly; SameSite=Lax"
-    headers = {
-        "Set-Cookie": f"CloudFront-Policy=mock-policy; {cookie_attrs}",
-    }
-    return Response(
-        status_code=204,
-        headers=headers,
+    try:
+        private_key_pem = cloudfront_private_key_pem()
+        if not CLOUDFRONT_KEY_PAIR_ID:
+            logger.error("CLOUDFRONT_KEY_PAIR_ID is not configured")
+            raise SecretNotConfiguredError()
+    except SecretNotConfiguredError:
+        if running_in_lambda():
+            raise
+        # Local dev server: no CloudFront in front of the media, so no cookies are needed.
+        logger.warning("Media signing not configured; local mode returns 204 without cookies")
+        return Response(status_code=204)
+
+    values = sign_cookies(
+        resource=media_resource(MEDIA_DOMAIN, room.media_id),
+        expires_at_sec=int(time.time()) + MEDIA_COOKIES_TTL_SEC,
+        key_pair_id=CLOUDFRONT_KEY_PAIR_ID,
+        private_key_pem=private_key_pem,
     )
+    # No Expires/Max-Age: session cookies, as AWS recommends; the policy itself expires.
+    cookies = [
+        Cookie(
+            name=name,
+            value=value,
+            domain=MEDIA_DOMAIN,
+            path="/media/",
+            secure=True,
+            http_only=True,
+            same_site=SameSite.LAX_MODE,
+        )
+        for name, value in values.items()
+    ]
+    return Response(status_code=204, cookies=cookies)
 
 
 @app.post("/rooms/<room_id>/rtc-token")
 def issue_rtc_token(room_id: str) -> dict[str, Any]:
-    token = extract_bearer_token()
-    claims = verify_room_token(token, expected_room_id=room_id)
-    participant = room_repo.get_participant(room_id, claims.sub)
+    """Issues a short-lived LiveKit access token (F-3.1, ADR-0004)."""
+    _, participant = require_active_participant(room_id)
+    api_key, api_secret = livekit_api_credentials()
 
-    now_ms = int(time.time() * 1000)
-    exp_ms = now_ms + (LIVEKIT_TOKEN_TTL_SEC * 1000)
+    # Imported lazily: only this route needs the LiveKit SDK.
+    from livekit import api
 
-    # Try LiveKit SDK if keys configured, otherwise fallback to signed room token
-    if LIVEKIT_API_KEY and LIVEKIT_API_SECRET:
-        try:
-            from livekit import api
-
-            livekit_jwt = (
-                api.AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-                .with_identity(participant.participant_id)
-                .with_name(participant.display_name)
-                .with_grants(
-                    api.VideoGrants(
-                        room_join=True,
-                        room=room_id,
-                        can_publish=True,
-                        can_subscribe=True,
-                    )
-                )
-                .to_jwt()
+    ttl = timedelta(seconds=LIVEKIT_TOKEN_TTL_SEC)
+    expires_at_ms = int(time.time() * 1000) + LIVEKIT_TOKEN_TTL_SEC * 1000
+    livekit_jwt = (
+        api.AccessToken(api_key, api_secret)
+        .with_identity(participant.participant_id)
+        .with_name(participant.display_name)
+        .with_ttl(ttl)
+        .with_grants(
+            api.VideoGrants(
+                room_join=True,
+                room=room_id,
+                can_publish=True,
+                can_subscribe=True,
+                # Chat and reactions go through the WebSocket API, not LiveKit data channels.
+                can_publish_data=False,
             )
-        except Exception:
-            livekit_jwt, _ = issue_room_token(room_id, participant.participant_id, participant.role)
-    else:
-        livekit_jwt, _ = issue_room_token(room_id, participant.participant_id, participant.role)
-
-    rtc_token = RtcToken(
-        token=livekit_jwt,
-        url=RTC_URL,
-        expires_at_ms=exp_ms,
+        )
+        .to_jwt()
     )
-    return rtc_token.model_dump(by_alias=True)
+
+    return RtcToken(token=livekit_jwt, url=LIVEKIT_URL, expires_at_ms=expires_at_ms).model_dump(
+        by_alias=True
+    )
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:

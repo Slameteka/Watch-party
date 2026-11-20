@@ -1242,6 +1242,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aws-lambda-powertools", extra = ["all"] },
     { name = "boto3" },
+    { name = "cryptography" },
     { name = "livekit-api" },
     { name = "pydantic" },
     { name = "pyjwt" },
@@ -1259,6 +1260,7 @@ dev = [
 requires-dist = [
     { name = "aws-lambda-powertools", extras = ["all"], specifier = ">=3.5.0" },
     { name = "boto3", specifier = ">=1.37.0" },
+    { name = "cryptography", specifier = ">=46.0.0" },
     { name = "livekit-api", specifier = ">=0.8.0" },
     { name = "pydantic", specifier = ">=2.10.0" },
     { name = "pyjwt", specifier = ">=2.10.0" },

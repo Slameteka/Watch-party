@@ -21,6 +21,10 @@ os.environ["ROOM_MAX_PARTICIPANTS"] = "10"
 os.environ["AWS_REGION"] = "ap-southeast-1"
 os.environ["APP_DOMAIN"] = "localhost:5173"
 os.environ["PARENT_DOMAIN"] = "localhost"
+# Public, documented defaults of `livekit-server --dev` (not secrets).
+os.environ.setdefault("LIVEKIT_API_KEY", "devkey")
+os.environ.setdefault("LIVEKIT_API_SECRET", "secret")
+os.environ.setdefault("LIVEKIT_URL", "ws://localhost:7880")
 
 # Start moto mock for DynamoDB
 from moto import mock_aws  # noqa: E402

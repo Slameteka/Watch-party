@@ -161,30 +161,42 @@ Seluruh payload REST API menggunakan format **JSON camelCase**. Response error d
   ```
 
 ### 2.7 Media CloudFront Signed Cookies
-- **Endpoint:** `GET /rooms/{roomId}/media/cookies`
+- **Endpoint:** `POST /rooms/{roomId}/media-cookies` (panggil dengan `credentials: "include"`, ulangi setiap 90 menit)
 - **Headers:** `Authorization: Bearer <roomToken>`
-- **Response (200 OK):**
-  ```json
-  {
-    "cookies": {
-      "CloudFront-Policy": "mock_policy_base64",
-      "CloudFront-Signature": "mock_signature_base64",
-      "CloudFront-Key-Pair-Id": "K2JC3FAKEKEYID"
-    },
-    "playbackUrl": "https://media.chescloud.my.id/hls/sintel/master.m3u8"
-  }
-  ```
+- **Response:** `204 No Content` dengan 3 `Set-Cookie`: `CloudFront-Policy`, `CloudFront-Signature`, `CloudFront-Key-Pair-Id`.
+  - Atribut: `Domain=<appDomain>; Path=/media/; Secure; HttpOnly; SameSite=Lax`. Tanpa `Expires`/`Max-Age` (saran AWS); masa berlaku ada di policy.
+  - Policy custom: hanya `https://<appDomain>/media/<mediaId>/*` milik room ini, berlaku 2 jam. Signature RSA-SHA1 (default CloudFront; SHA-256 butuh cookie ke-4 dan perubahan kontrak).
+- **Error:** 401 token salah, 403 token room lain atau peserta di-kick, 404 room/peserta tidak ada, 410 room ditutup/expired, 500 jika key belum dikonfigurasi.
+- **Mode lokal** (`local_server.py`, tanpa private key): `204` tanpa cookie, karena tidak ada CloudFront di depan film.
 
 ### 2.8 LiveKit RTC Token (Video/Audio Chat)
-- **Endpoint:** `POST /rooms/{roomId}/rtc/token`
+- **Endpoint:** `POST /rooms/{roomId}/rtc-token`
 - **Headers:** `Authorization: Bearer <roomToken>`
 - **Response (200 OK):**
   ```json
   {
-    "rtcToken": "mock_livekit_token",
-    "livekitUrl": "wss://livekit.chescloud.my.id"
+    "token": "<JWT LiveKit>",
+    "url": "wss://rtc.watchparty.chescloud.my.id",
+    "expiresAtMs": 1763620800000
   }
   ```
+- Token: `identity = participantId`, `name = displayName`, `room = roomId`, grant `roomJoin`, `canPublish`, `canSubscribe`, **tanpa** `canPublishData`. TTL 10 menit, hanya untuk connect.
+- **Error:** sama dengan 2.7. Jika key LiveKit belum dikonfigurasi → 500 (tidak ada token pengganti).
+- **Mode lokal:** `local_server.py` memakai key bawaan `livekit-server --dev` (`devkey` / `secret`, `ws://localhost:7880`).
+
+### 2.9 Konfigurasi Secret
+Di Lambda, secret **hanya** dibaca dari SSM Parameter Store (SecureString) lewat env `*_NAME` yang diisi Terraform. Env berisi nilai mentah diabaikan di Lambda, dan tidak ada nilai cadangan: secret yang hilang → 500 (fail closed). Di luar Lambda (server lokal, pytest), env nilai mentah dipakai.
+
+| Secret | Env di Lambda (nama parameter) | Env lokal/test (nilai) |
+|---|---|---|
+| Signing key room token | `ROOM_TOKEN_SECRET_NAME` | `ROOM_TOKEN_SECRET` |
+| Private key CloudFront | `CLOUDFRONT_PRIVATE_KEY_NAME` | `CLOUDFRONT_PRIVATE_KEY_PEM` |
+| LiveKit API key | `LIVEKIT_API_KEY_NAME` | `LIVEKIT_API_KEY` |
+| LiveKit API secret | `LIVEKIT_API_SECRET_NAME` | `LIVEKIT_API_SECRET` |
+
+Non-secret: `CLOUDFRONT_KEY_PAIR_ID` (output `cloudfront_public_key_id` modul `edge`), `CLOUDFRONT_DOMAIN` (domain cookie), `LIVEKIT_URL`.
+
+Nilai SSM di-cache selama execution environment Lambda hidup. Setelah rotasi secret, update konfigurasi Lambda atau deploy ulang agar environment baru membaca nilai baru.
 
 ---
 
@@ -288,7 +300,7 @@ Setelah koneksi `$connect` terbuka dan tervalidasi, client mengirim `session.res
 
 ## 5. Pengujian & Quality Assurance
 
-### 5.1 Menjalankan Unit Tests (28 Tests)
+### 5.1 Menjalankan Unit Tests
 ```bash
 uv run pytest
 ```

@@ -6,9 +6,10 @@ import uuid
 import jwt
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.config import ROOM_TOKEN_SECRET, ROOM_TOKEN_TTL_SEC
+from core.config import ROOM_TOKEN_TTL_SEC
 from core.errors import ForbiddenError, UnauthorizedError
 from core.models.common import Role
+from core.secret_store import room_token_secret
 
 
 class RoomTokenClaims(BaseModel):
@@ -30,7 +31,7 @@ def issue_room_token(
     room_id: str,
     participant_id: str,
     role: Role,
-    secret: str = ROOM_TOKEN_SECRET,
+    secret: str | None = None,
     ttl_sec: int = ROOM_TOKEN_TTL_SEC,
 ) -> tuple[str, int]:
     """Issues a signed HS256 room token.
@@ -53,25 +54,27 @@ def issue_room_token(
         "jti": str(uuid.uuid4()),
     }
 
-    token = jwt.encode(payload, secret, algorithm="HS256")
+    token = jwt.encode(payload, secret or room_token_secret(), algorithm="HS256")
     return token, expires_at_ms
 
 
 def verify_room_token(
     token: str,
     expected_room_id: str | None = None,
-    secret: str = ROOM_TOKEN_SECRET,
+    secret: str | None = None,
 ) -> RoomTokenClaims:
     """Verifies and decodes an HS256 room token.
 
     Raises:
         UnauthorizedError: If token is expired, invalid, or signature does not match.
         ForbiddenError: If expected_room_id is provided and does not match token roomId.
+        SecretNotConfiguredError: If the signing secret is not configured (fail closed).
     """
+    key = secret or room_token_secret()
     try:
         decoded = jwt.decode(
             token,
-            secret,
+            key,
             algorithms=["HS256"],
             audience="room",
             issuer="watchparty",
