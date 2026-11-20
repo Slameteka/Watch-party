@@ -56,3 +56,9 @@
 | t3.small cukup untuk 10 peserta | prior knowledge, unverified | Diputuskan lewat load test M3 (NFR-1.5, OQ-6) |
 | Instance type yang dipilih bisa diluncurkan di akun Free plan | perlu dicek hari 1 | Runbook cek D5 |
 | Harga t3.small `ap-southeast-1` ≈ $0,0264/jam | verified (sumber pihak ketiga) | [doit.com t3.small ap-southeast-1](https://www.doit.com/compute/compute/aws/ap-southeast-1/t3.small) |
+| Pola VM resmi LiveKit: Caddy `livekit/caddyl4` di 443 dengan routing SNI, `turn.` → TURN `external_tls` di 5349, `rtc.` → 7880; port 80 untuk penerbitan TLS | verified (sumber pihak ketiga) | [LiveKit VM deployment](https://docs.livekit.io/transport/self-hosting/vm/); template di image `livekit/generate` (dicek 20 Nov 2026) |
+| LiveKit selalu mengiklankan TURN/TLS sebagai `turns:<domain>:443` jika `tls_port` diisi | verified (sumber pihak ketiga) | [livekit v1.13.11 `pkg/service/roommanager.go`](https://github.com/livekit/livekit/blob/v1.13.11/pkg/service/roommanager.go) |
+| `key_file` LiveKit ditolak jika bisa dibaca "others" (wajib mode 0600) | verified (sumber pihak ketiga) | [livekit v1.13.11 `pkg/config/config.go`](https://github.com/livekit/livekit/blob/v1.13.11/pkg/config/config.go) |
+| `livekit.yaml` dan `caddy.yaml` dari modul `rtc` diterima image yang di-pin (LiveKit v1.13.11 start normal; `caddy validate` OK) | verified (tes lokal 20 Nov 2026) | [modul rtc](../../infra/terraform/modules/rtc/README.md) |
+| Izin minimal Session Manager untuk instance profile (`ssm:UpdateInstanceInformation`, `ssmmessages:*Channel`) | verified (AWS docs) | [Create a custom IAM role for Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/getting-started-create-iam-instance-profile.html) |
+| Default grant LiveKit Python SDK: TTL 6 jam dan `can_publish_data = true`, jadi wajib di-set eksplisit (TTL 10 menit, `false`) | verified (tes lokal `livekit-api` 1.2.2) | `backend/tests/unit/test_media_rtc.py` |
