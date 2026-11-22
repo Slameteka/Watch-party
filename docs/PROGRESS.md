@@ -31,6 +31,28 @@ Aturan:
 - Biaya bulan berjalan: $__ | Sisa credits: $__ | Alert budget terakhir: __%
 ```
 
+## 2026-11-22 (Minggu)
+
+**Selesai**
+- [Lead] Wiring `module "rtc"` (LiveKit EC2) di `infra/terraform/envs/prod`: tambah data source `aws_vpc.default` + `aws_subnets.default_public`, block `module "rtc"` (subnet default VPC, `route53_zone_id` default `null`), sambung `livekit_url = module.rtc.livekit_url` ke `module "api"`, variabel baru (`route53_zone_id`, `rtc_instance_type`, `rtc_schedule_enabled`) + contoh di `terraform.tfvars.example`, dan 5 output `rtc_*`. `terraform fmt -check` bersih dan `terraform validate` lulus (Terraform 1.17.1, provider AWS 6.73.0, `init -backend=false`). **Belum di-apply.**
+- [RTC/Media] Transcode 3 film Blender selesai dan lolos `verify` di laptop: Big Buck Bunny (596 s, 727 MB), Sintel (888 s, 1.1 GB), Tears of Steel (734 s, 901 MB) — total ±2.7 GB, masing-masing 4 rendition HLS 360p–1080p + poster + `manifest.json`. ffmpeg Docker `linuxserver/ffmpeg:9.0.2-cli-ls89`, output di luar repo (`~/watchparty-media/hls`). Kecepatan ±1,2–1,5× real-time (lebih cepat dari estimasi 0,2–0,4× di README karena laptop berbeda). `upload`/`register` ke AWS belum dijalankan (lihat blocker).
+
+**Keputusan + alasan**
+- Wiring dikerjakan Lead sebagai pengisi gap (modul `rtc` sudah ada sejak 2026-11-19 tetapi belum terpasang di `envs/prod`). Lead = Accountable untuk `envs/` dan modul `rtc` (RACI PRD §11.2); perubahan hanya memanggil modul, tidak mengubah isinya. PR akan di-review Platform (owner `envs/`) dan RTC/Media (owner `rtc`) sebelum merge.
+- `subnet_id` memakai subnet default VPC sementara, sesuai README modul `rtc`; diganti ke `module.network` saat modul itu ada.
+- `route53_zone_id` default `null` agar `validate` dan rencana awal aman tanpa membuat record DNS sebelum delegasi final dipakai di env ini.
+- Transcode dijalankan manual/offline di laptop (bukan otomatis/MediaConvert) sesuai ADR-0005: katalog tetap 3 film, MediaConvert dilarang untuk akun Free plan, biaya transcoding $0.
+
+**Blocker**
+- Apply `module "rtc"` belum bisa — Platform/RTC/Media — butuh parameter SSM `/watchparty/prod/livekit-api-key` dan `/watchparty/prod/livekit-api-secret` (bootstrap §7) dan record `rtc.`/`turn.` mengarah ke EIP agar Caddy menerbitkan sertifikat.
+- `upload` + `register` 3 film belum bisa — Platform/RTC/Media — butuh media bucket (modul `edge` di-apply) + profil AWS dengan policy `media-publisher`, lalu tabel `main` (modul `data`) + `APP_DOMAIN` untuk `register`.
+
+**Berikutnya**
+- [Platform] Review + apply `module "rtc"` setelah prasyarat SSM/DNS siap; sesudah apply, verifikasi `dig`/`curl` sesuai README modul dan runbook LiveKit.
+- [RTC/Media] Jalankan `upload` + `register` 3 film setelah modul `edge`/`data` ter-apply dan policy `media-publisher` ter-attach.
+
+---
+
 ## 2026-11-19 (Kamis)
 
 **Selesai**

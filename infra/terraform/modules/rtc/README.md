@@ -42,7 +42,9 @@ Image di-pin dengan tag **dan** digest (`livekit_image`, `caddy_image`; validasi
 
 Output: `instance_id`, `public_ip`, `livekit_url`, `rtc_domain`, `turn_domain`, `security_group_id`.
 
-## Wiring di `envs/prod` (dikerjakan Platform)
+## Wiring di `envs/prod`
+
+> Status: **sudah terpasang** di `envs/prod` sejak 2026-11-22 (wiring oleh Lead, menunggu review Platform + RTC/Media, belum di-apply). Contoh di bawah adalah bentuk yang dipakai.
 
 ```hcl
 data "aws_vpc" "default" {
