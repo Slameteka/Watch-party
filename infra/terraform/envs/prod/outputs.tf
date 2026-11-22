@@ -47,3 +47,30 @@ output "connections_table_name" {
   description = "Name of the WebSocket connections DynamoDB table"
   value       = module.data.connections_table_name
 }
+
+# --- RTC (LiveKit EC2) ---
+
+output "rtc_instance_id" {
+  description = "LiveKit EC2 instance ID (Session Manager, runbook)"
+  value       = module.rtc.instance_id
+}
+
+output "rtc_public_ip" {
+  description = "Elastic IP of the LiveKit instance"
+  value       = module.rtc.public_ip
+}
+
+output "rtc_livekit_url" {
+  description = "WebSocket URL LiveKit for clients"
+  value       = module.rtc.livekit_url
+}
+
+output "rtc_domain" {
+  description = "LiveKit signaling hostname (rtc.<app_domain>)"
+  value       = module.rtc.rtc_domain
+}
+
+output "rtc_turn_domain" {
+  description = "TURN/TLS hostname (turn.<app_domain>)"
+  value       = module.rtc.turn_domain
+}

@@ -38,3 +38,31 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+# --- RTC (LiveKit EC2) ---
+
+variable "route53_zone_id" {
+  description = "Route 53 hosted zone ID for app_domain. When null, the rtc. and turn. records are not created (set after DNS delegation)."
+  type        = string
+  default     = null
+}
+
+variable "rtc_instance_type" {
+  description = "EC2 instance type for LiveKit; only AWS Free plan eligible types (ADR-0004)"
+  type        = string
+  default     = "t3.small"
+
+  validation {
+    condition = contains(
+      ["t3.micro", "t3.small", "t4g.micro", "t4g.small", "c7i-flex.large", "m7i-flex.large"],
+      var.rtc_instance_type
+    )
+    error_message = "rtc_instance_type must be one of: t3.micro, t3.small, t4g.micro, t4g.small, c7i-flex.large, m7i-flex.large."
+  }
+}
+
+variable "rtc_schedule_enabled" {
+  description = "Start/stop the LiveKit instance on a schedule (EventBridge Scheduler). Required when using c7i-flex.large (ADR-0004)."
+  type        = bool
+  default     = false
+}
