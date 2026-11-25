@@ -13,6 +13,12 @@ const ROLES: Role[] = ['host', 'controller', 'viewer']
  */
 export function useRoomSession(): void {
   useEffect(() => {
+    // If opening an invite deep-link path /r/:roomId, skip default auto-join so JoinRoomModal can ask for name
+    const isDeepLink = window.location.pathname.startsWith('/r/')
+    if (isDeepLink) {
+      return stopSession
+    }
+
     const params = new URLSearchParams(window.location.search)
     const role = params.get('role') as Role | null
     void startSession({

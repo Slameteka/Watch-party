@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { LogoTv, RadioBroadcastIcon, SoundWaveIcon } from './Icons'
 import { WatchPlayer } from '../player/WatchPlayer'
+import { usePlaybackStore } from '../player/usePlaybackStore'
 
 interface CenterTheaterProps {
   onInvite?: () => void
@@ -49,6 +50,13 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
     }, 3200)
   }
 
+  const media = usePlaybackStore((s) => s.media)
+  const connection = usePlaybackStore((s) => s.connection)
+
+  const movieTitle = media?.title ?? 'Malam Minggu'
+  const isConnected = connection === 'connected'
+  const isConnecting = connection === 'connecting' || connection === 'reconnecting'
+
   return (
     <main className="flex-1 flex flex-col h-full bg-[#0c0d10] overflow-hidden select-none text-[#8e929d]">
       {/* 1. Sub-header Breadcrumb Bar (Height 56px / h-14) */}
@@ -63,8 +71,8 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
             <Menu className="w-5 h-5" />
           </button>
 
-          <Clapperboard className="w-4 h-4 text-white shrink-0" />
-          <span className="font-semibold text-white text-[13px] truncate">Malam Minggu</span>
+          <Clapperboard className="w-4 h-4 text-purple-400 shrink-0" />
+          <span className="font-semibold text-white text-[13px] truncate">{movieTitle}</span>
           <span className="hidden sm:flex items-center gap-1 text-[11px] text-gray-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/5 ml-1 shrink-0">
             <Lock className="w-3 h-3 text-gray-400" />
             Privat
@@ -72,9 +80,33 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-          <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="hidden md:inline">Tersinkron</span>
+          <div
+            className={`flex items-center gap-1.5 text-xs font-medium ${
+              isConnected
+                ? 'text-emerald-400'
+                : isConnecting
+                  ? 'text-amber-400'
+                  : 'text-gray-400'
+            }`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isConnected
+                  ? 'bg-emerald-400 animate-pulse'
+                  : isConnecting
+                    ? 'bg-amber-400 animate-pulse'
+                    : 'bg-gray-400'
+              }`}
+            />
+            <span className="hidden md:inline">
+              {isConnected
+                ? 'Tersinkron'
+                : connection === 'reconnecting'
+                  ? 'Menyambung ulang…'
+                  : connection === 'connecting'
+                    ? 'Menghubungkan…'
+                    : 'Menyiapkan…'}
+            </span>
           </div>
 
           <button

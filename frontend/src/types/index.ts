@@ -1,3 +1,5 @@
+import type { Role } from './watchparty'
+
 export type {
   Role,
   PlayerStatus,
@@ -25,6 +27,8 @@ export interface RoomInfo {
   inviteUrl: string
 }
 
+export type RoomSummary = RoomInfo
+
 export interface MediaItem {
   mediaId: string
   title: string
@@ -34,6 +38,33 @@ export interface MediaItem {
   playbackUrl: string
   license: string
   attribution: string
+}
+
+export interface CatalogResponse {
+  items: MediaItem[]
+}
+
+export interface CreateRoomRequest {
+  mediaId: string
+  displayName: string
+  maxParticipants?: number
+}
+
+export interface CreateRoomResponse {
+  room: RoomInfo
+  session: {
+    roomId: string
+    participantId: string
+    displayName: string
+    role: Role
+    roomToken: string
+    roomTokenExpiresAtMs: number
+    wsUrl: string
+  }
+}
+
+export interface JoinRoomRequest {
+  displayName: string
 }
 
 export interface WsEnvelope<T = Record<string, unknown>> {

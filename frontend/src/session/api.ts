@@ -1,6 +1,13 @@
 // REST calls used by the player and session layer (docs/contracts/openapi.yaml).
 
-import type { ErrorPayload, Role } from '../types'
+import type {
+  CatalogResponse,
+  CreateRoomRequest,
+  CreateRoomResponse,
+  ErrorPayload,
+  Role,
+  RoomSummary,
+} from '../types'
 
 /** Response of POST /rooms/{roomId}/join and /session/refresh (schema RoomSession). */
 export interface RoomSession {
@@ -89,4 +96,43 @@ export async function requestMediaCookies(roomId: string, roomToken: string): Pr
     headers: { authorization: `Bearer ${roomToken}` },
     credentials: 'include',
   })
+}
+
+/**
+ * Fetch the curated film catalog (F-1.1, F-5.1).
+ * Public endpoint, returns list of available movies with posters and duration.
+ */
+export async function getCatalog(): Promise<CatalogResponse> {
+  const response = await request('/catalog', { method: 'GET' })
+  return (await response.json()) as CatalogResponse
+}
+
+/**
+ * Fetch room summary before joining (F-1.3, F-1.4).
+ * Returns room title, media info, host name, and capacity.
+ */
+export async function getRoomSummary(roomId: string): Promise<RoomSummary> {
+  const response = await request(`/rooms/${encodeURIComponent(roomId)}`, {
+    method: 'GET',
+  })
+  return (await response.json()) as RoomSummary
+}
+
+/**
+ * Create a new room with a movie from the catalog (F-1.2, F-1.8).
+ * Requires Cognito ID token of authenticated host.
+ */
+export async function createRoom(
+  cognitoIdToken: string,
+  payload: CreateRoomRequest,
+): Promise<CreateRoomResponse> {
+  const response = await request('/rooms', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${cognitoIdToken}`,
+    },
+    body: JSON.stringify(payload),
+  })
+  return (await response.json()) as CreateRoomResponse
 }
