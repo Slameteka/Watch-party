@@ -31,6 +31,29 @@ Aturan:
 - Biaya bulan berjalan: $__ | Sisa credits: $__ | Alert budget terakhir: __%
 ```
 
+## 2026-11-25 (Rabu)
+
+**Selesai**
+- [Backend] Menambah route moderasi Host sesuai `openapi.yaml` di `feat/backend-host-moderation-routes`: `PUT`/`DELETE /rooms/{roomId}/controllers/{participantId}` dan `DELETE /rooms/{roomId}/participants/{participantId}` (kick atomik DynamoDB, putus WebSocket, best-effort remove LiveKit).
+- [Backend] Menambah `verify_cognito_jwt` (RS256 via JWKS Cognito) pada `POST /rooms/{roomId}/join`, membaca `authorizer.jwt.claims.sub` di `POST /rooms`, dan memperbaiki env `COGNITO_APP_CLIENT_ID` di `core/config.py`. 51 unit test `pytest` + simulasi 11 langkah `simulate_party.py` + `ruff` lolos.
+- [FE-Player] Menyelesaikan integrasi katalog (`GET /catalog`), form buat room (`POST /rooms`), dan modal join tamu (`/r/:roomId`, `GET /rooms/{roomId}`) di branch `feat/player-catalog-room-integration` beserta `frontend/.env.example` yang aman (default mock lokal).
+- [FE-Social] Menyelesaikan wiring `ChatSidebar`, `VideoGrid`, `VideoTile` (track attachment + speaking indicator), `MediaControls`, `ReactionOverlay`, `ReactionPicker`, koneksi LiveKit (`POST /rooms/{roomId}/rtc-token`), dan aksi kontrol/kick di branch `feat/social-webrtc-chat-integration`. 60 unit test Vitest, Oxlint (0 warning/0 error), Vite build, dan 22 selftest `mock-server` lolos.
+
+**Keputusan + alasan**
+- Verifikasi JWT Cognito pada `/rooms/{roomId}/join` memakai `PyJWT` (`RS256` JWKS) secara fail-closed — mencegah spoofing `sub` pada rute `$default` yang tidak memakai authorizer API Gateway; tanpa menambah dependency baru.
+- `frontend/.env.example` hanya berisi template mock lokal (`http://localhost:8787`, `VITE_HLS_WITH_CREDENTIALS=false`) — mencegah kebocoran ID resource AWS dan mencegah development lokal menembak resource produksi.
+- Sistem user management penuh tetap ditunda sebagai rencana masa depan (*future plan*) di luar v1 sesuai PRD §6.2 & §7 US-1.6.
+
+**Blocker**
+- Paket Lambda (`backend/dist/backend.zip`) perlu di-build ulang (`build_lambda.sh`) dan di-deploy setelah PR Backend merge agar route moderasi dan verifier Cognito aktif di AWS produksi.
+- Workflow CI/CD deploy frontend (`deploy.yml`) dan upload file poster ke S3 media bucket (`posters/`) masih menunggu penyelesaian dari Platform/RTC/Media.
+
+**Berikutnya**
+- [Backend] Review + squash merge PR Backend, FE-Player, dan FE-Social ke `main`, lalu build ulang Lambda dan uji E2E di cloud.
+- [Platform] Menyiapkan workflow deploy frontend di `.github/workflows/` dengan variabel build `VITE_*` non-secret.
+
+---
+
 ## 2026-11-22 (Minggu)
 
 **Selesai**
