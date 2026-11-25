@@ -1,157 +1,249 @@
-locals {
-  name        = "${var.project_name}-${var.env}-rtc"
-  rtc_domain  = "rtc.${var.app_domain}"
-  turn_domain = "turn.${var.app_domain}"
-
-  param_prefix         = "/${var.project_name}/${var.env}"
-  api_key_parameter    = "${local.param_prefix}/livekit-api-key"
-  api_secret_parameter = "${local.param_prefix}/livekit-api-secret"
-
-  # t4g is Graviton (arm64); the other Free plan types are x86_64.
-  architecture = startswith(var.rtc_instance_type, "t4g.") ? "arm64" : "x86_64"
-  burstable    = startswith(var.rtc_instance_type, "t3.") || startswith(var.rtc_instance_type, "t4g.")
-
-  tags = merge(var.tags, { Owner = "rtc-media" })
-
-  # Ports from LiveKit's VM deployment and firewall docs (architecture.md §9.9).
-  # Rule descriptions must stay in the EC2 charset (no apostrophes).
-  ingress_rules = {
-    acme_http = { protocol = "tcp", from = 80, to = 80, description = "Lets Encrypt HTTP-01 challenge" }
-    tls       = { protocol = "tcp", from = 443, to = 443, description = "Caddy: WSS signaling (rtc.) and TURN/TLS (turn.) by SNI" }
-    ice_tcp   = { protocol = "tcp", from = 7881, to = 7881, description = "WebRTC ICE over TCP" }
-    turn_udp  = { protocol = "udp", from = 3478, to = 3478, description = "TURN/UDP and STUN" }
-    ice_udp   = { protocol = "udp", from = 50000, to = 60000, description = "WebRTC ICE over UDP (media)" }
-  }
-}
-
-data "aws_caller_identity" "current" {}
-
-data "aws_subnet" "selected" {
-  id = var.subnet_id
-}
-
-# Latest Amazon Linux 2023 AMI from the public SSM parameter. lifecycle.ignore_changes on the
-# instance keeps a new AMI release from replacing a running instance.
 data "aws_ssm_parameter" "al2023_ami" {
-  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-${local.architecture}"
+  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
 }
 
-# ------------------------------------------------------------------ network
+# 1. Credentials for LiveKit
+resource "random_string" "livekit_api_key" {
+  length  = 16
+  special = false
+}
 
+resource "random_password" "livekit_api_secret" {
+  length  = 32
+  special = false
+}
+
+resource "aws_ssm_parameter" "livekit_api_key" {
+  name        = "/${var.project_name}/${var.env}/livekit/api_key"
+  description = "LiveKit API Key"
+  type        = "String"
+  value       = random_string.livekit_api_key.result
+  tags        = var.tags
+}
+
+resource "aws_ssm_parameter" "livekit_api_secret" {
+  name        = "/${var.project_name}/${var.env}/livekit/api_secret"
+  description = "LiveKit API Secret"
+  type        = "SecureString"
+  value       = random_password.livekit_api_secret.result
+  tags        = var.tags
+}
+
+resource "aws_ssm_parameter" "livekit_url" {
+  name        = "/${var.project_name}/${var.env}/livekit/url"
+  description = "LiveKit Server WSS URL"
+  type        = "String"
+  value       = "wss://rtc.${var.app_domain}"
+  tags        = var.tags
+}
+
+# 2. IAM Role & Profile for SSM Session Manager (No port 22 needed)
+resource "aws_iam_role" "rtc" {
+  name = "${var.project_name}-${var.env}-rtc-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "ssm" {
+  role       = aws_iam_role.rtc.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "rtc" {
+  name = "${var.project_name}-${var.env}-rtc-profile"
+  role = aws_iam_role.rtc.name
+  tags = var.tags
+}
+
+# 3. Security Group for WebRTC and Caddy
 resource "aws_security_group" "rtc" {
-  name        = local.name
-  description = "LiveKit SFU, TURN, and Caddy TLS; no SSH"
-  vpc_id      = data.aws_subnet.selected.vpc_id
+  name        = "${var.project_name}-${var.env}-rtc-sg"
+  description = "Security group for LiveKit WebRTC and Caddy TLS"
+  vpc_id      = var.vpc_id
 
-  tags = merge(local.tags, { Name = local.name })
+  # HTTP (Let's Encrypt validation)
+  ingress {
+    description = "HTTP ACME challenge"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # HTTPS (Caddy reverse proxy to LiveKit signaling)
+  ingress {
+    description = "HTTPS Caddy TLS & LiveKit WebRTC signaling"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # LiveKit WebRTC TCP fallback
+  ingress {
+    description = "LiveKit WebRTC TCP fallback"
+    from_port   = 7881
+    to_port     = 7881
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # LiveKit TURN UDP
+  ingress {
+    description = "LiveKit TURN UDP"
+    from_port   = 3478
+    to_port     = 3478
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # LiveKit WebRTC Media UDP range
+  ingress {
+    description = "LiveKit WebRTC media UDP range"
+    from_port   = 50000
+    to_port     = 60000
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Outbound
+  egress {
+    description = "Allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.env}-rtc-sg"
+  })
 }
 
-resource "aws_vpc_security_group_ingress_rule" "rtc" {
-  for_each = local.ingress_rules
-
-  security_group_id = aws_security_group.rtc.id
-  description       = each.value.description
-  ip_protocol       = each.value.protocol
-  from_port         = each.value.from
-  to_port           = each.value.to
-  cidr_ipv4         = "0.0.0.0/0"
-
-  tags = merge(local.tags, { Name = "${local.name}-${each.key}" })
-}
-
-# Outbound is open: Docker image pulls, SSM, Let's Encrypt, and WebRTC media to any viewer.
-resource "aws_vpc_security_group_egress_rule" "all" {
-  security_group_id = aws_security_group.rtc.id
-  description       = "All outbound"
-  ip_protocol       = "-1"
-  cidr_ipv4         = "0.0.0.0/0"
-
-  tags = merge(local.tags, { Name = "${local.name}-egress" })
-}
-
-# The ENI exists before the instance so the Elastic IP is attached when the instance boots.
-resource "aws_network_interface" "rtc" {
-  subnet_id       = var.subnet_id
-  security_groups = [aws_security_group.rtc.id]
-  description     = "LiveKit primary interface"
-
-  tags = merge(local.tags, { Name = local.name })
-}
-
+# 4. Elastic IP
 resource "aws_eip" "rtc" {
-  domain            = "vpc"
-  network_interface = aws_network_interface.rtc.id
-
-  tags = merge(local.tags, { Name = local.name })
+  domain = "vpc"
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.env}-rtc-eip"
+  })
 }
 
-# ------------------------------------------------------------------ instance
-
+# 5. EC2 Instance
 resource "aws_instance" "rtc" {
-  ami                  = data.aws_ssm_parameter.al2023_ami.insecure_value
-  instance_type        = var.rtc_instance_type
-  iam_instance_profile = aws_iam_instance_profile.rtc.name
-  monitoring           = false
-
-  primary_network_interface {
-    network_interface_id = aws_network_interface.rtc.id
-  }
-
-  # Standard credits avoid surprise charges from T-instance unlimited mode.
-  dynamic "credit_specification" {
-    for_each = local.burstable ? [1] : []
-    content {
-      cpu_credits = "standard"
-    }
-  }
-
-  metadata_options {
-    http_endpoint               = "enabled"
-    http_tokens                 = "required"
-    http_put_response_hop_limit = 1
-  }
+  ami                    = data.aws_ssm_parameter.al2023_ami.value
+  instance_type          = var.instance_type
+  subnet_id              = var.public_subnet_id
+  vpc_security_group_ids = [aws_security_group.rtc.id]
+  iam_instance_profile   = aws_iam_instance_profile.rtc.name
 
   root_block_device {
+    volume_size           = var.volume_size
     volume_type           = "gp3"
-    volume_size           = 8
     encrypted             = true
     delete_on_termination = true
+    tags = merge(var.tags, {
+      Name = "${var.project_name}-${var.env}-rtc-root"
+    })
   }
 
-  user_data = templatefile("${path.module}/templates/user_data.sh.tftpl", {
-    aws_region           = var.aws_region
-    api_key_parameter    = local.api_key_parameter
-    api_secret_parameter = local.api_secret_parameter
-    livekit_image        = var.livekit_image
-    caddy_image          = var.caddy_image
-    livekit_yaml = templatefile("${path.module}/templates/livekit.yaml.tftpl", {
-      public_ip        = aws_eip.rtc.public_ip
-      turn_domain      = local.turn_domain
-      max_participants = var.room_max_participants
-    })
-    caddy_yaml = templatefile("${path.module}/templates/caddy.yaml.tftpl", {
-      rtc_domain  = local.rtc_domain
-      turn_domain = local.turn_domain
-      private_ip  = aws_network_interface.rtc.private_ip
-    })
+  user_data = <<-EOF
+    #!/bin/bash
+    set -xe
+    dnf update -y
+    dnf install -y docker
+    systemctl enable --now docker
+
+    mkdir -p /opt/livekit
+
+    cat << 'LKCONF' > /opt/livekit/livekit.yaml
+    port: 7880
+    bind_addresses:
+      - ""
+    rtc:
+      tcp_port: 7881
+      port_range_start: 50000
+      port_range_end: 60000
+      use_external_ip: true
+    keys:
+      ${random_string.livekit_api_key.result}: ${random_password.livekit_api_secret.result}
+    turn:
+      enabled: true
+      domain: turn.${var.app_domain}
+      udp_port: 3478
+    LKCONF
+
+    cat << 'CADCONF' > /opt/livekit/Caddyfile
+    rtc.${var.app_domain} {
+        reverse_proxy localhost:7880
+    }
+    CADCONF
+
+    cat << 'COMPOSE' > /opt/livekit/docker-compose.yaml
+    services:
+      livekit:
+        image: livekit/livekit-server:v1.8.3
+        restart: unless-stopped
+        network_mode: host
+        volumes:
+          - /opt/livekit/livekit.yaml:/etc/livekit.yaml
+        command: --config /etc/livekit.yaml
+
+      caddy:
+        image: caddy:2.8.4-alpine
+        restart: unless-stopped
+        network_mode: host
+        volumes:
+          - /opt/livekit/Caddyfile:/etc/caddy/Caddyfile
+          - /opt/caddy_data:/data
+          - /opt/caddy_config:/config
+    COMPOSE
+
+    dnf install -y docker-compose-plugin || (curl -SL https://github.com/docker/compose/releases/download/v2.29.2/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose && chmod +x /usr/local/bin/docker-compose)
+
+    cd /opt/livekit
+    docker compose up -d || docker-compose up -d
+  EOF
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-${var.env}-rtc-instance"
   })
-  # A config or version change builds a fresh instance instead of editing it in place.
-  user_data_replace_on_change = true
 
   lifecycle {
     ignore_changes = [ami]
   }
-
-  tags = merge(local.tags, { Name = local.name })
 }
 
-# ------------------------------------------------------------------ DNS
+# 6. Associate Elastic IP
+resource "aws_eip_association" "rtc" {
+  instance_id   = aws_instance.rtc.id
+  allocation_id = aws_eip.rtc.id
+}
 
+# 7. DNS Records in Route 53
 resource "aws_route53_record" "rtc" {
-  for_each = var.route53_zone_id == null ? toset([]) : toset([local.rtc_domain, local.turn_domain])
-
   zone_id = var.route53_zone_id
-  name    = each.value
+  name    = "rtc.${var.app_domain}"
+  type    = "A"
+  ttl     = 300
+  records = [aws_eip.rtc.public_ip]
+}
+
+resource "aws_route53_record" "turn" {
+  zone_id = var.route53_zone_id
+  name    = "turn.${var.app_domain}"
   type    = "A"
   ttl     = 300
   records = [aws_eip.rtc.public_ip]
