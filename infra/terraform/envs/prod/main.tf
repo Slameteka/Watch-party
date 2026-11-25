@@ -2,6 +2,14 @@ locals {
   lambda_zip = "${path.root}/../../../../backend/dist/backend.zip"
 }
 
+# 0. Modul Network: VPC, 1 Public Subnet, IGW (No NAT Gateway, Zero Cost)
+module "network" {
+  source       = "../../modules/network"
+  project_name = var.project_name
+  env          = var.env
+  tags         = var.tags
+}
+
 # 1. Modul Data: DynamoDB Main & Connections Tables
 module "data" {
   source       = "../../modules/data"
@@ -52,42 +60,54 @@ module "api" {
   room_max_participants  = var.room_max_participants
   ws_management_endpoint = module.realtime.ws_management_endpoint
   ws_execution_arn       = module.realtime.websocket_api_execution_arn
-  livekit_url            = module.rtc.livekit_url
   lambda_zip_path        = local.lambda_zip
   tags                   = var.tags
 }
 
-# Subnet publik untuk instance LiveKit. Selama modul network belum ada, pakai
-# subnet default VPC (lihat README modul rtc). Ganti ke module.network saat tersedia.
-data "aws_vpc" "default" {
-  default = true
-}
-
-data "aws_subnets" "default_public" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
-  filter {
-    name   = "default-for-az"
-    values = ["true"]
+# 5. Modul DNS: Route 53 Hosted Zone & ACM Certificate di us-east-1
+module "dns" {
+  source       = "../../modules/dns"
+  project_name = var.project_name
+  env          = var.env
+  app_domain   = var.app_domain
+  tags         = var.tags
+  providers = {
+    aws.us_east_1 = aws.us_east_1
   }
 }
 
-# 5. Modul RTC: EC2 LiveKit (SFU), TURN, dan Caddy TLS
-# Pemilik modul: RTC/Media. Wiring di envs/ oleh Platform (RACI PRD §11.2).
-# Prasyarat apply: parameter SSM livekit-api-key & livekit-api-secret (bootstrap §7)
-# dan DNS rtc./turn. mengarah ke EIP agar Caddy bisa menerbitkan sertifikat.
-module "rtc" {
-  source                = "../../modules/rtc"
+# 6. Modul Edge: S3 Web & Media Buckets, CloudFront CDN, Signed Cookies & Route 53 Alias
+module "edge" {
+  source              = "../../modules/edge"
+  project_name        = var.project_name
+  env                 = var.env
+  app_domain          = var.app_domain
+  acm_certificate_arn = module.dns.acm_certificate_arn
+  route53_zone_id     = module.dns.zone_id
+  api_endpoint        = module.api.api_endpoint
+  tags                = var.tags
+}
+
+# 7. Modul Observability: AWS Budgets Alert, SNS Topic & CloudWatch Dashboard
+module "observability" {
+  source                = "../../modules/observability"
   project_name          = var.project_name
   env                   = var.env
-  aws_region            = var.aws_region
-  app_domain            = var.app_domain
-  subnet_id             = sort(data.aws_subnets.default_public.ids)[0]
-  route53_zone_id       = var.route53_zone_id
-  rtc_instance_type     = var.rtc_instance_type
-  room_max_participants = var.room_max_participants
-  rtc_schedule_enabled  = var.rtc_schedule_enabled
+  api_gateway_http_name = module.api.api_id
+  api_gateway_ws_name   = module.realtime.websocket_api_id
   tags                  = var.tags
+}
+
+# 8. Modul RTC: LiveKit EC2, Elastic IP, Security Group & Route 53 Records
+module "rtc" {
+  source           = "../../modules/rtc"
+  project_name     = var.project_name
+  env              = var.env
+  aws_region       = var.aws_region
+  vpc_id           = module.network.vpc_id
+  public_subnet_id = module.network.public_subnet_id
+  route53_zone_id  = module.dns.zone_id
+  app_domain       = var.app_domain
+  instance_type    = var.rtc_instance_type
+  tags             = var.tags
 }
