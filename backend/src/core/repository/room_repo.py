@@ -297,6 +297,8 @@ class RoomRepository:
             raise NotFoundError("Host participant record not found.")
 
         room = self.get_room_summary(room_id)
+        if room.status == RoomStatus.CLOSED:
+            raise RoomClosedError("Room is closed or expired.")
         host_participant = Participant(
             participant_id=host_part_id,
             display_name=part_item["displayName"],
@@ -333,6 +335,11 @@ class RoomRepository:
         if new_role == Role.HOST:
             raise ForbiddenError("Host role cannot be transferred.")
 
+        # Distinguish missing participant (404) from kicked/host (403).
+        existing = self.get_participant(room_id, participant_id)
+        if existing.role == Role.HOST:
+            raise ForbiddenError("Cannot modify host role or kicked participant.")
+
         try:
             response = self.table.update_item(
                 Key={"PK": f"ROOM#{room_id}", "SK": f"PARTICIPANT#{participant_id}"},
@@ -359,6 +366,71 @@ class RoomRepository:
             if is_conditional_check_failed(e):
                 raise ForbiddenError("Cannot modify host role or kicked participant.") from e
             raise
+
+    def kick_participant(self, room_id: str, participant_id: str) -> str | None:
+        """Marks a guest participant as kicked and atomically clears active connection state.
+
+        Returns the active WebSocket connectionId if the participant was connected, else None.
+        """
+        resp = self.table.get_item(
+            Key={"PK": f"ROOM#{room_id}", "SK": f"PARTICIPANT#{participant_id}"}
+        )
+        item = resp.get("Item")
+        if not item:
+            raise NotFoundError(f"Participant '{participant_id}' not found.")
+        if item.get("role") == Role.HOST.value:
+            raise ForbiddenError("Host cannot be kicked.")
+        if item.get("kicked") is True:
+            raise ForbiddenError("Participant has already been removed from this room.")
+
+        old_conn_id = item.get("connectionId")
+        was_connected = bool(item.get("connected", False))
+
+        transact_items: list[dict[str, Any]] = [
+            {
+                "Update": {
+                    "TableName": self.table.name,
+                    "Key": {"PK": f"ROOM#{room_id}", "SK": f"PARTICIPANT#{participant_id}"},
+                    "UpdateExpression": "SET kicked = :true_val, connected = :false_val REMOVE connectionId",
+                    "ConditionExpression": "attribute_exists(PK) AND #role <> :host_role AND kicked = :not_kicked",
+                    "ExpressionAttributeNames": {"#role": "role"},
+                    "ExpressionAttributeValues": {
+                        ":true_val": True,
+                        ":false_val": False,
+                        ":host_role": Role.HOST.value,
+                        ":not_kicked": False,
+                    },
+                }
+            }
+        ]
+
+        if was_connected:
+            transact_items.append(
+                {
+                    "Update": {
+                        "TableName": self.table.name,
+                        "Key": {"PK": f"ROOM#{room_id}", "SK": "META"},
+                        "UpdateExpression": "SET connectedGuestCount = connectedGuestCount - :one",
+                        "ConditionExpression": "connectedGuestCount > :zero",
+                        "ExpressionAttributeValues": {":one": 1, ":zero": 0},
+                    }
+                }
+            )
+
+        resource = get_dynamodb_resource()
+        try:
+            resource.meta.client.transact_write_items(TransactItems=transact_items)
+        except ClientError as e:
+            if is_conditional_check_failed(e):
+                raise ForbiddenError("Cannot kick host or already removed participant.") from e
+            raise
+
+        if old_conn_id:
+            from core.repository.connection_repo import ConnectionRepository
+
+            ConnectionRepository().connections_table.delete_item(Key={"connectionId": old_conn_id})
+
+        return old_conn_id if was_connected and isinstance(old_conn_id, str) else None
 
     def update_player_status(self, room_id: str, participant_id: str, status: str) -> Participant:
         """Updates participant player status (e.g. ready, buffering, syncing) and returns updated Participant."""

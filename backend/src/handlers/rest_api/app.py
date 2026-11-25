@@ -1,17 +1,22 @@
 """Main REST API Lambda Handler using AWS Lambda Powertools."""
 
+import asyncio
 import time
 import uuid
 from datetime import timedelta
+from os import getenv
 from typing import Any
 
 from aws_lambda_powertools import Logger
 from aws_lambda_powertools.event_handler import APIGatewayHttpResolver, CORSConfig, Response
 from aws_lambda_powertools.shared.cookies import Cookie, SameSite
+from botocore.exceptions import ClientError
 from pydantic import ValidationError as PydanticValidationError
 
 from core.auth.cloudfront import media_resource, sign_cookies
+from core.auth.cognito import verify_cognito_jwt
 from core.auth.token import issue_room_token, verify_room_token
+from core.broadcast.gateway import broadcast_to_room, get_apigw_client, send_to_connection
 from core.catalog_data import DEFAULT_CATALOG_ITEMS
 from core.config import (
     APP_URL,
@@ -20,6 +25,7 @@ from core.config import (
     LIVEKIT_URL,
     MEDIA_COOKIES_TTL_SEC,
     MEDIA_DOMAIN,
+    WS_MANAGEMENT_ENDPOINT,
     WS_URL,
 )
 from core.errors import (
@@ -41,6 +47,16 @@ from core.models.rest import (
     RtcToken,
 )
 from core.models.room import Participant, Room
+from core.models.websocket import (
+    MsgParticipantLeft,
+    MsgParticipantUpdated,
+    MsgSessionEnded,
+    ParticipantLeftPayload,
+    ParticipantUpdatedPayload,
+    SessionEndedPayload,
+    WsEnvelope,
+)
+from core.repository.base import current_epoch_ms
 from core.repository.room_repo import RoomRepository
 from core.secret_store import (
     SecretNotConfiguredError,
@@ -120,6 +136,88 @@ def require_active_participant(room_id: str) -> tuple[Room, Participant]:
     return room, participant
 
 
+def _require_host(room_id: str) -> tuple[Room, Participant]:
+    """Authenticates an active participant and enforces the host role from DynamoDB."""
+    room, participant = require_active_participant(room_id)
+    if participant.role != Role.HOST:
+        raise ForbiddenError("Only host can perform this action.")
+    return room, participant
+
+
+def _ws_endpoint() -> str:
+    return getenv("WS_MANAGEMENT_ENDPOINT") or WS_MANAGEMENT_ENDPOINT
+
+
+def _broadcast_ws(room_id: str, message: WsEnvelope) -> None:
+    """Broadcasts a room WebSocket event if management endpoint is configured."""
+    endpoint = _ws_endpoint()
+    if not endpoint:
+        return
+    try:
+        broadcast_to_room(endpoint_url=endpoint, room_id=room_id, message=message)
+    except Exception as e:
+        logger.warning(
+            "WebSocket broadcast failed",
+            extra={"roomId": room_id, "error": str(e)},
+        )
+
+
+def _disconnect_kicked_ws(connection_id: str | None) -> None:
+    """Sends session.ended (kicked) and closes the kicked participant's WebSocket."""
+    if not connection_id:
+        return
+    endpoint = _ws_endpoint()
+    if not endpoint:
+        return
+    try:
+        send_to_connection(
+            endpoint_url=endpoint,
+            connection_id=connection_id,
+            message=MsgSessionEnded(
+                sent_at_ms=current_epoch_ms(),
+                payload=SessionEndedPayload(reason="kicked"),
+            ),
+        )
+        get_apigw_client(endpoint).delete_connection(ConnectionId=connection_id)
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code")
+        if error_code not in ("GoneException", "410"):
+            logger.warning(
+                "Failed to close kicked WebSocket connection",
+                extra={"errorCode": error_code},
+            )
+    except Exception as e:
+        logger.warning("Failed to disconnect kicked WebSocket", extra={"error": str(e)})
+
+
+def _remove_from_livekit(room_id: str, participant_id: str) -> None:
+    """Best-effort removal of a kicked participant from LiveKit SFU room."""
+    try:
+        api_key, api_secret = livekit_api_credentials()
+    except SecretNotConfiguredError:
+        return
+
+    try:
+        from livekit import api
+
+        async def _remove() -> None:
+            async with api.LiveKitAPI(
+                url=LIVEKIT_URL,
+                api_key=api_key,
+                api_secret=api_secret,
+            ) as lk:
+                await lk.room.remove_participant(
+                    api.RoomParticipantIdentity(room=room_id, identity=participant_id)
+                )
+
+        asyncio.run(_remove())
+    except Exception as e:
+        logger.warning(
+            "Best-effort LiveKit participant removal failed",
+            extra={"roomId": room_id, "participantId": participant_id, "error": str(e)},
+        )
+
+
 # ==============================================================================
 # Routes
 # ==============================================================================
@@ -156,12 +254,14 @@ def create_room() -> Response:
         except NotFoundError as e:
             raise ValidationError(f"Media '{req.media_id}' does not exist.") from e
 
-    # Extract Cognito sub if present (for host), otherwise generate anonymous host user id
-    auth_header = app.current_event.headers.get("authorization", "")
-    host_user_id = "user_host_local"
-    if auth_header.startswith("Bearer "):
-        # In real Cognito, extract sub from token claims; default to hash/uuid for local
-        host_user_id = f"user_{uuid.uuid4().hex[:12]}"
+    # Extract Cognito sub from API Gateway JWT authorizer claims; fallback for local tests without authorizer
+    claims = (
+        app.current_event.raw_event.get("requestContext", {})
+        .get("authorizer", {})
+        .get("jwt", {})
+        .get("claims", {})
+    )
+    host_user_id = claims.get("sub") or f"user_{uuid.uuid4().hex[:12]}"
 
     room, host_participant = room_repo.create_room(
         media=media,
@@ -205,11 +305,12 @@ def join_room(room_id: str) -> dict[str, Any]:
     raw_body = app.current_event.json_body or {}
     req = JoinRoomRequest.model_validate(raw_body)
 
-    # Pre-check if returning host via Cognito header
+    # Pre-check if returning host via verified Cognito JWT
     auth_header = app.current_event.headers.get("authorization", "")
     if auth_header.startswith("Bearer "):
-        cognito_sub = auth_header[7:].strip()
+        bearer_token = auth_header[7:].strip()
         try:
+            cognito_sub = verify_cognito_jwt(bearer_token)
             room, host = room_repo.get_host_participant(room_id, cognito_sub)
             token, exp_ms = issue_room_token(room_id, host.participant_id, Role.HOST)
             return RoomSession(
@@ -221,8 +322,8 @@ def join_room(room_id: str) -> dict[str, Any]:
                 room_token_expires_at_ms=exp_ms,
                 ws_url=WS_URL,
             ).model_dump(by_alias=True)
-        except ForbiddenError, NotFoundError:
-            pass
+        except UnauthorizedError, ForbiddenError:
+            logger.info("Cognito host verification failed on join; continuing as guest viewer")
 
     # Guest join (viewer)
     room, guest = room_repo.join_guest(room_id, req.display_name)
@@ -335,6 +436,62 @@ def issue_rtc_token(room_id: str) -> dict[str, Any]:
     return RtcToken(token=livekit_jwt, url=LIVEKIT_URL, expires_at_ms=expires_at_ms).model_dump(
         by_alias=True
     )
+
+
+@app.put("/rooms/<room_id>/controllers/<participant_id>")
+def grant_controller(room_id: str, participant_id: str) -> dict[str, Any]:
+    """Grants playback controller role to a participant (F-2.2). Host only."""
+    _, host = _require_host(room_id)
+    if participant_id == host.participant_id:
+        raise ForbiddenError("Host cannot modify own role.")
+
+    updated = room_repo.update_participant_role(room_id, participant_id, Role.CONTROLLER)
+    _broadcast_ws(
+        room_id,
+        MsgParticipantUpdated(
+            sent_at_ms=current_epoch_ms(),
+            payload=ParticipantUpdatedPayload(participant=updated),
+        ),
+    )
+    return updated.model_dump(by_alias=True)
+
+
+@app.delete("/rooms/<room_id>/controllers/<participant_id>")
+def revoke_controller(room_id: str, participant_id: str) -> dict[str, Any]:
+    """Revokes playback controller role back to viewer (F-2.2). Host only."""
+    _, host = _require_host(room_id)
+    if participant_id == host.participant_id:
+        raise ForbiddenError("Host cannot modify own role.")
+
+    updated = room_repo.update_participant_role(room_id, participant_id, Role.VIEWER)
+    _broadcast_ws(
+        room_id,
+        MsgParticipantUpdated(
+            sent_at_ms=current_epoch_ms(),
+            payload=ParticipantUpdatedPayload(participant=updated),
+        ),
+    )
+    return updated.model_dump(by_alias=True)
+
+
+@app.delete("/rooms/<room_id>/participants/<participant_id>")
+def kick_participant(room_id: str, participant_id: str) -> Response:
+    """Removes (kicks) a participant from the room (F-1.6). Host only."""
+    _, host = _require_host(room_id)
+    if participant_id == host.participant_id:
+        raise ForbiddenError("Host cannot kick self.")
+
+    old_conn_id = room_repo.kick_participant(room_id, participant_id)
+    _disconnect_kicked_ws(old_conn_id)
+    _remove_from_livekit(room_id, participant_id)
+    _broadcast_ws(
+        room_id,
+        MsgParticipantLeft(
+            sent_at_ms=current_epoch_ms(),
+            payload=ParticipantLeftPayload(participant_id=participant_id, reason="kicked"),
+        ),
+    )
+    return Response(status_code=204)
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
