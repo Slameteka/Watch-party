@@ -1,8 +1,9 @@
 import React from 'react'
+import { usePlaybackStore } from '../player/usePlaybackStore'
+import { wsClient } from '../services/websocket'
 import { useSocialStore } from '../state/useSocialStore'
 import type { EmojiType } from '../types'
 import { EMOJI_MAP } from '../types'
-import { wsClient } from '../services/websocket'
 
 const EMOJI_LIST: { type: EmojiType; label: string }[] = [
   { type: 'thumbsUp', label: 'Jempol' },
@@ -12,17 +13,26 @@ const EMOJI_LIST: { type: EmojiType; label: string }[] = [
   { type: 'sad', label: 'Sedih' },
 ]
 
-export const ReactionPicker: React.FC = () => {
+interface ReactionPickerProps {
+  layout?: 'pill' | 'inline'
+}
+
+export const ReactionPicker: React.FC<ReactionPickerProps> = ({ layout = 'pill' }) => {
+  const connection = usePlaybackStore((s) => s.connection)
   const {
     canSendReaction,
     recordReactionSent,
-    triggerReaction,
-    selfParticipantId,
     reactionError,
     setReactionError,
   } = useSocialStore()
 
   const handleSend = (emoji: EmojiType) => {
+    if (connection !== 'connected' || !wsClient.isConnected) {
+      setReactionError('Belum terhubung ke ruang.')
+      setTimeout(() => setReactionError(null), 2500)
+      return
+    }
+
     if (!canSendReaction()) {
       setReactionError('Batas reaksi tercapai (maks 10 per 10 detik). Harap tunggu.')
       setTimeout(() => setReactionError(null), 3000)
@@ -30,11 +40,31 @@ export const ReactionPicker: React.FC = () => {
     }
 
     recordReactionSent()
-    if (selfParticipantId) {
-      triggerReaction(selfParticipantId, emoji)
-    }
-
+    setReactionError(null)
+    // Server broadcasts reaction.added to everyone including sender; avoid duplicate local trigger.
     wsClient.sendReaction(emoji)
+  }
+
+  if (layout === 'inline') {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {EMOJI_LIST.map(({ type, label }) => (
+          <button
+            key={type}
+            onClick={() => handleSend(type)}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#151720] hover:bg-[#1d202c] border border-[#252838] text-sm text-gray-200 transition-all cursor-pointer active:scale-95 select-none"
+            title={label}
+          >
+            <span>{EMOJI_MAP[type]}</span>
+          </button>
+        ))}
+        {reactionError && (
+          <span className="text-[11px] text-amber-400 font-medium bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/20">
+            {reactionError}
+          </span>
+        )}
+      </div>
+    )
   }
 
   return (

@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react'
 import type { Participant as LKParticipant } from 'livekit-client'
 import { Track } from 'livekit-client'
 import { Mic, MicOff, Shield, VideoOff, Wifi } from 'lucide-react'
+import { useLiveKitStore } from '../state/useLiveKitStore'
 import type { Role } from '../types'
 
 interface VideoTileProps {
@@ -11,6 +12,7 @@ interface VideoTileProps {
   isLocal?: boolean
   isHost?: boolean
   quality?: 'excellent' | 'good' | 'poor'
+  isSpeaking?: boolean
 }
 
 export const VideoTile: React.FC<VideoTileProps> = ({
@@ -20,9 +22,12 @@ export const VideoTile: React.FC<VideoTileProps> = ({
   isLocal = false,
   isHost = false,
   quality = 'good',
+  isSpeaking: isSpeakingProp,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
+  const trackVersion = useLiveKitStore((s) => s.trackVersion)
+  const activeSpeakerIds = useLiveKitStore((s) => s.activeSpeakerIds)
 
   useEffect(() => {
     if (!participant) return
@@ -31,32 +36,31 @@ export const VideoTile: React.FC<VideoTileProps> = ({
     const audioEl = audioRef.current
 
     const videoPub = participant.getTrackPublication(Track.Source.Camera)
-    if (videoPub && videoPub.track && videoEl) {
-      videoPub.track.attach(videoEl)
+    const videoTrack = videoPub && !videoPub.isMuted ? videoPub.track : undefined
+    if (videoTrack && videoEl) {
+      videoTrack.attach(videoEl)
     }
 
-    if (!isLocal && audioEl) {
-      const audioPub = participant.getTrackPublication(Track.Source.Microphone)
-      if (audioPub && audioPub.track) {
-        audioPub.track.attach(audioEl)
-      }
+    const audioPub = !isLocal ? participant.getTrackPublication(Track.Source.Microphone) : undefined
+    const audioTrack = audioPub && !audioPub.isMuted ? audioPub.track : undefined
+    if (!isLocal && audioTrack && audioEl) {
+      audioTrack.attach(audioEl)
     }
 
     return () => {
-      if (videoPub && videoPub.track && videoEl) {
-        videoPub.track.detach(videoEl)
+      if (videoTrack && videoEl) {
+        videoTrack.detach(videoEl)
       }
-      if (!isLocal && audioEl) {
-        const audioPub = participant.getTrackPublication(Track.Source.Microphone)
-        if (audioPub && audioPub.track) {
-          audioPub.track.detach(audioEl)
-        }
+      if (!isLocal && audioTrack && audioEl) {
+        audioTrack.detach(audioEl)
       }
     }
-  }, [participant, isLocal])
+  }, [participant, isLocal, trackVersion])
 
   const isCameraEnabled = participant?.isCameraEnabled ?? false
   const isMicEnabled = participant?.isMicrophoneEnabled ?? false
+  const isSpeaking =
+    isSpeakingProp ?? (!!participant && activeSpeakerIds.includes(participant.identity))
 
   const initial = displayName.trim().charAt(0).toUpperCase() || '?'
 
@@ -68,7 +72,13 @@ export const VideoTile: React.FC<VideoTileProps> = ({
         : 'text-rose-400'
 
   return (
-    <div className="relative group flex items-center justify-center bg-gray-900/80 rounded-xl overflow-hidden border border-gray-800 shadow-md aspect-video">
+    <div
+      className={`relative group flex items-center justify-center bg-[#14161f] rounded-xl overflow-hidden border shadow-md aspect-video transition-all ${
+        isSpeaking
+          ? 'border-emerald-400 ring-2 ring-emerald-400/50'
+          : 'border-[#202432]'
+      }`}
+    >
       <video
         ref={videoRef}
         autoPlay
@@ -83,11 +93,17 @@ export const VideoTile: React.FC<VideoTileProps> = ({
 
       {!isCameraEnabled && (
         <div className="flex flex-col items-center justify-center select-none">
-          <div className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center text-white font-bold text-lg md:text-xl shadow-lg border border-purple-400/30">
+          <div
+            className={`w-12 h-12 md:w-14 md:h-14 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center text-white font-bold text-lg md:text-xl shadow-lg transition-all ${
+              isSpeaking
+                ? 'ring-2 ring-emerald-400 ring-offset-2 ring-offset-[#14161f]'
+                : 'border border-purple-400/30'
+            }`}
+          >
             {initial}
           </div>
-          <span className="text-xs text-gray-400 mt-2 flex items-center gap-1 font-medium">
-            <VideoOff className="w-3.5 h-3.5" /> Kamera Nonaktif
+          <span className="text-[11px] text-gray-400 mt-2 flex items-center gap-1 font-medium">
+            <VideoOff className="w-3 h-3" /> Kamera Nonaktif
           </span>
         </div>
       )}
@@ -95,7 +111,7 @@ export const VideoTile: React.FC<VideoTileProps> = ({
       <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-2 py-1 rounded-md text-xs font-medium border border-white/10">
         <Wifi className={`w-3.5 h-3.5 ${qualityColor}`} />
         {isMicEnabled ? (
-          <Mic className="w-3.5 h-3.5 text-emerald-400" />
+          <Mic className={`w-3.5 h-3.5 ${isSpeaking ? 'text-emerald-300 animate-pulse' : 'text-emerald-400'}`} />
         ) : (
           <MicOff className="w-3.5 h-3.5 text-rose-400" />
         )}

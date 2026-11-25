@@ -6,6 +6,7 @@
 
 import { estimateClockOffset, type ClockSample } from '../player/sync'
 import { usePlaybackStore } from '../player/usePlaybackStore'
+import { useLiveKitStore } from '../state/useLiveKitStore'
 import { useSocialStore } from '../state/useSocialStore'
 import { wsClient } from '../services/websocket'
 import type {
@@ -18,7 +19,17 @@ import type {
   Role,
   WsEnvelope,
 } from '../types'
-import { ApiError, joinRoom, refreshSession, requestMediaCookies, type RoomSession } from './api'
+import {
+  ApiError,
+  grantController,
+  joinRoom,
+  kickParticipant,
+  refreshSession,
+  requestMediaCookies,
+  requestRtcToken,
+  revokeController,
+  type RoomSession,
+} from './api'
 import { backoffDelayMs } from './backoff'
 
 // Numbers from docs/contracts/ws-messages.md and docs/architecture.md §3.
@@ -147,8 +158,50 @@ export function stopSession(): void {
   clearTimers()
   ctx.unsubscribe.forEach((off) => off())
   wsClient.disconnect()
+  useLiveKitStore.getState().disconnect()
   ctx = freshContext()
   usePlaybackStore.getState().reset()
+  useSocialStore.getState().reset()
+}
+
+/**
+ * Grant or revoke playback controller permission for a participant (F-2.2).
+ * Keeps roomToken isolated inside the session layer.
+ */
+export async function toggleParticipantController(
+  participantId: string,
+  currentRole: Role,
+): Promise<Participant> {
+  const session = ctx.session
+  if (!session || ctx.ended) {
+    throw new Error('Belum terhubung ke ruang.')
+  }
+  try {
+    const updated =
+      currentRole === 'controller'
+        ? await revokeController(session.roomId, participantId, session.roomToken)
+        : await grantController(session.roomId, participantId, session.roomToken)
+    useSocialStore.getState().onParticipantUpdated(updated)
+    return updated
+  } catch (error) {
+    throw new Error(mapActionError(error, 'Gagal mengubah peran controller.'))
+  }
+}
+
+/**
+ * Kick a participant from the active room (F-1.6). Host only.
+ * Keeps roomToken isolated inside the session layer.
+ */
+export async function kickRoomParticipant(participantId: string): Promise<void> {
+  const session = ctx.session
+  if (!session || ctx.ended) {
+    throw new Error('Belum terhubung ke ruang.')
+  }
+  try {
+    await kickParticipant(session.roomId, participantId, session.roomToken)
+  } catch (error) {
+    throw new Error(mapActionError(error, 'Gagal mengeluarkan peserta.'))
+  }
 }
 
 /**
@@ -209,6 +262,7 @@ export function handleServerMessage(msg: WsEnvelope<unknown>): void {
       scheduleExpiry()
       startClockSync()
       flushPlayerStatus()
+      void connectLiveKitIfNeeded(generation)
       break
     }
     case 'playback.state': {
@@ -366,6 +420,7 @@ function failFromError(error: unknown): void {
   }
   clearTimers()
   wsClient.disconnect()
+  useLiveKitStore.getState().disconnect()
   ctx.ended = true
   usePlaybackStore.getState().setConnection('failed', reason)
 }
@@ -375,7 +430,38 @@ function endSession(reason: string): void {
   ctx.ended = true
   // The server closes the socket after session.ended. Detach so it does not look like a drop.
   wsClient.disconnect()
+  useLiveKitStore.getState().disconnect()
   usePlaybackStore.getState().setConnection('ended', reason)
+}
+
+async function connectLiveKitIfNeeded(mineGeneration: number): Promise<void> {
+  const session = ctx.session
+  if (!session || ctx.ended) return
+  const lk = useLiveKitStore.getState()
+  if (lk.isConnected || lk.isConnecting) return
+
+  try {
+    const rtc = await requestRtcToken(session.roomId, session.roomToken)
+    if (mineGeneration !== generation || ctx.ended || !ctx.session) return
+    await useLiveKitStore.getState().connect(rtc.url, rtc.token)
+  } catch {
+    if (mineGeneration !== generation || ctx.ended) return
+    // Graceful degradation (PRD §6.3): keep movie and chat working without exposing internal errors.
+    useLiveKitStore.setState({ error: 'Video chat sedang tidak tersedia' })
+  }
+}
+
+function mapActionError(error: unknown, fallback: string): string {
+  if (!(error instanceof ApiError)) return fallback
+  const messages: Record<number, string> = {
+    401: 'Sesi tidak valid. Muat ulang halaman.',
+    403: 'Hanya host yang dapat melakukan tindakan ini.',
+    404: 'Peserta atau endpoint manajemen ruang tidak tersedia.',
+    410: 'Ruang sudah ditutup.',
+    429: 'Terlalu banyak permintaan. Tunggu sebentar.',
+    0: 'Tidak bisa menghubungi server.',
+  }
+  return messages[error.status] ?? fallback
 }
 
 async function fetchMediaCookies(): Promise<void> {

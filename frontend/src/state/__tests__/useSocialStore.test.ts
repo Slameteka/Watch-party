@@ -102,4 +102,32 @@ describe('useSocialStore', () => {
       .participants.find((p) => p.participantId === 'p_host')
     expect(updatedHost?.connected).toBe(false)
   })
+
+  it('caps simultaneous active reactions at 20 and resets cleanly', () => {
+    const store = useSocialStore.getState()
+    for (let i = 0; i < 25; i += 1) {
+      store.triggerReaction(`p_${i}`, 'heart')
+    }
+
+    const reactions = useSocialStore.getState().activeReactions
+    expect(reactions).toHaveLength(20)
+    expect(reactions[0]?.participantId).toBe('p_5')
+    expect(reactions[19]?.participantId).toBe('p_24')
+
+    store.addChatMessage({
+      messageId: 'm1',
+      participantId: 'p_1',
+      displayName: 'User',
+      text: 'hi',
+      createdAtMs: 1000,
+    })
+    store.reset()
+
+    const afterReset = useSocialStore.getState()
+    expect(afterReset.participants).toHaveLength(0)
+    expect(afterReset.messages).toHaveLength(0)
+    expect(afterReset.activeReactions).toHaveLength(0)
+    expect(afterReset.selfParticipantId).toBeNull()
+    expect(afterReset.selfRole).toBe('viewer')
+  })
 })
