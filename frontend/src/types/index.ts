@@ -67,6 +67,12 @@ export interface JoinRoomRequest {
   displayName: string
 }
 
+export interface RtcTokenResponse {
+  token: string
+  url: string
+  expiresAtMs: number
+}
+
 export interface WsEnvelope<T = Record<string, unknown>> {
   v: 1
   type: string

@@ -8,6 +8,8 @@ export interface ActiveReaction {
   timestamp: number
 }
 
+const MAX_ACTIVE_REACTIONS = 20
+
 interface SocialState {
   participants: Participant[]
   selfParticipantId: string | null
@@ -38,6 +40,7 @@ interface SocialState {
   removeReaction: (id: string) => void
   setChatError: (error: string | null) => void
   setReactionError: (error: string | null) => void
+  reset: () => void
 
   // Rate limit check helpers
   canSendChat: () => boolean
@@ -112,7 +115,7 @@ export const useSocialStore = create<SocialState>((set, get) => ({
       timestamp: Date.now(),
     }
     set((state) => ({
-      activeReactions: [...state.activeReactions, newReaction],
+      activeReactions: [...state.activeReactions, newReaction].slice(-MAX_ACTIVE_REACTIONS),
     }))
 
     setTimeout(() => {
@@ -127,6 +130,21 @@ export const useSocialStore = create<SocialState>((set, get) => ({
 
   setChatError: (error) => set({ chatError: error }),
   setReactionError: (error) => set({ reactionError: error }),
+
+  reset: () =>
+    set({
+      participants: [],
+      selfParticipantId: null,
+      selfRole: 'viewer',
+      messages: [],
+      activeReactions: [],
+      chatError: null,
+      reactionError: null,
+      chatWindowCount: 0,
+      reactionWindowCount: 0,
+      lastChatWindowResetMs: Date.now(),
+      lastReactionWindowResetMs: Date.now(),
+    }),
 
   canSendChat: () => {
     const now = Date.now()

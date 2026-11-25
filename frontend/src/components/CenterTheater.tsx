@@ -1,24 +1,22 @@
-import React, { useState } from 'react'
+import React from 'react'
 import {
-  Bookmark,
-  Check,
   Clapperboard,
-  Crown,
-  Info,
   Link2,
   Lock,
   Menu,
   MessageSquare,
-  Mic,
-  MicOff,
   MoreHorizontal,
-  Smile,
   UserPlus,
-  VideoOff,
 } from 'lucide-react'
-import { LogoTv, RadioBroadcastIcon, SoundWaveIcon } from './Icons'
-import { WatchPlayer } from '../player/WatchPlayer'
+import { formatTime } from '../player/format'
 import { usePlaybackStore } from '../player/usePlaybackStore'
+import { WatchPlayer } from '../player/WatchPlayer'
+import { ReactionOverlay } from '../reactions/ReactionOverlay'
+import { ReactionPicker } from '../reactions/ReactionPicker'
+import { useSocialStore } from '../state/useSocialStore'
+import { MediaControls } from '../video/MediaControls'
+import { VideoGrid } from '../video/VideoGrid'
+import { LogoTv, RadioBroadcastIcon } from './Icons'
 
 interface CenterTheaterProps {
   onInvite?: () => void
@@ -33,27 +31,20 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
   onToggleRightSidebar,
   isRightSidebarOpen = false,
 }) => {
-  const [isMicActive, setIsMicActive] = useState(true)
-  const [isCameraActive, setIsCameraActive] = useState(false)
-
-  // Floating reactions simulation
-  const [reactions, setReactions] = useState<{ id: number; emoji: string }[]>([
-    { id: 1, emoji: '❤️' },
-    { id: 2, emoji: '👍' },
-  ])
-
-  const addReaction = (emoji: string) => {
-    const newId = Date.now()
-    setReactions((prev) => [...prev, { id: newId, emoji }])
-    setTimeout(() => {
-      setReactions((prev) => prev.filter((r) => r.id !== newId))
-    }, 3200)
-  }
-
   const media = usePlaybackStore((s) => s.media)
   const connection = usePlaybackStore((s) => s.connection)
+  const participants = useSocialStore((s) => s.participants)
 
-  const movieTitle = media?.title ?? 'Malam Minggu'
+  const connectedParticipants = participants.filter((p) => p.connected)
+  const controllers = participants.filter((p) => p.role === 'host' || p.role === 'controller')
+  const controllerBadgeInitial =
+    controllers[0]?.displayName.trim().slice(0, 2).toUpperCase() || 'WP'
+  const controllerSummary =
+    controllers.length > 0
+      ? `${controllers.map((c) => c.displayName).join(', ')} mengontrol pemutaran`
+      : 'Menunggu host…'
+
+  const movieTitle = media?.title ?? 'Watch Party'
   const isConnected = connection === 'connected'
   const isConnecting = connection === 'connecting' || connection === 'reconnecting'
 
@@ -150,15 +141,17 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
               Beda tempat. Satu cerita.
             </h1>
             <p className="text-xs text-gray-400 mt-0.5">
-              Ambil camilanmu, filmnya sudah dimulai. 🍿
+              Ambil camilanmu, tonton bersama secara serentak.
             </p>
           </div>
 
           <div className="self-start sm:self-auto flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#151720] border border-[#252838] text-xs">
             <span className="w-4 h-4 rounded-full bg-[#d97757] text-white font-bold text-[8px] flex items-center justify-center shrink-0">
-              RA
+              {controllerBadgeInitial}
             </span>
-            <span className="text-gray-300 font-medium text-[11px]">Raka mengontrol pemutaran</span>
+            <span className="text-gray-300 font-medium text-[11px] truncate max-w-[220px]">
+              {controllerSummary}
+            </span>
           </div>
         </div>
 
@@ -168,241 +161,62 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
           <WatchPlayer />
 
           {/* Watermark Branding inside video */}
-          <div className="absolute top-4 left-5 flex items-center gap-2 text-white/90 font-bold text-xs tracking-tight select-none">
+          <div className="absolute top-4 left-5 flex items-center gap-2 text-white/90 font-bold text-xs tracking-tight select-none pointer-events-none">
             <LogoTv className="w-4 h-4 text-white" />
             <span>watch party</span>
           </div>
 
-          <div className="absolute top-4 right-5 flex items-center gap-1.5 text-[11px] text-white/80 font-medium bg-black/40 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-white/10">
+          <div className="absolute top-4 right-5 flex items-center gap-1.5 text-[11px] text-white/80 font-medium bg-black/40 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-white/10 pointer-events-none">
             <RadioBroadcastIcon className="w-3.5 h-3.5 text-white mr-0.5" />
-            <span>6 orang · satu momen</span>
+            <span>{connectedParticipants.length} orang · satu momen</span>
           </div>
 
-          {/* Floating Reactions on video */}
-          <div className="absolute inset-0 pointer-events-none overflow-hidden">
-            {reactions.map((r, i) => (
-              <div
-                key={r.id}
-                className="absolute right-12 text-3xl animate-bounce"
-                style={{
-                  bottom: `${70 + i * 45}px`,
-                  animation: 'floatUp 3s ease-out forwards',
-                }}
-              >
-                {r.emoji}
+          {/* Floating Reactions overlay driven by WebSocket / useSocialStore */}
+          <ReactionOverlay />
+        </div>
+
+        {/* 4. Film Metadata Row (Dynamic from usePlaybackStore) */}
+        <div className="flex flex-col gap-1 pt-0.5">
+          <h2 className="text-base md:text-lg font-bold text-white tracking-tight">
+            {media?.title ?? 'Menunggu film…'}
+          </h2>
+          {media ? (
+            <>
+              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-gray-400">
+                <span>{formatTime(media.durationSec)}</span>
+                <span>·</span>
+                <span className="border border-gray-600/80 px-1.5 py-0.2 rounded text-[10px] text-gray-300 font-medium">
+                  {media.license}
+                </span>
+                <span>·</span>
+                <span>{media.attribution}</span>
               </div>
-            ))}
-          </div>
+              {media.description && (
+                <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{media.description}</p>
+              )}
+            </>
+          ) : (
+            <p className="text-xs text-gray-500">Menghubungkan ke ruang nonton…</p>
+          )}
         </div>
 
-        {/* 4. Film Metadata & Actions Row */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-0.5">
-          <div>
-            <h2 className="text-base md:text-lg font-bold text-white tracking-tight">
-              Langit Setelah Hujan
-            </h2>
-            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-gray-400 mt-0.5">
-              <span>2025</span>
-              <span>·</span>
-              <span>Drama, Petualangan</span>
-              <span>·</span>
-              <span className="border border-gray-600/80 px-1 py-0.2 rounded text-[10px] text-gray-300 font-medium">
-                13+
-              </span>
-              <span>·</span>
-              <span>Audio Indonesia</span>
-              <span>·</span>
-              <span>Subtitel Indonesia</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#14161f] hover:bg-[#1d202c] text-gray-200 text-xs font-medium border border-[#252838] transition-all cursor-pointer">
-              <Bookmark className="w-3.5 h-3.5 text-gray-400" />
-              <span>Simpan</span>
-            </button>
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#14161f] hover:bg-[#1d202c] text-gray-200 text-xs font-medium border border-[#252838] transition-all cursor-pointer">
-              <Info className="w-3.5 h-3.5 text-gray-400" />
-              <span>Detail film</span>
-            </button>
-          </div>
-        </div>
-
-        {/* 5. Reactions Counter Bar */}
+        {/* 5. Reactions Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 py-2 border-y border-[#181a22]">
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={() => addReaction('👍')}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#151720] hover:bg-[#1d202c] border border-[#252838] text-xs font-medium text-gray-200 transition-all cursor-pointer active:scale-95"
-            >
-              <span>👍</span>
-              <span>12</span>
-            </button>
-
-            <button
-              onClick={() => addReaction('❤️')}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#151720] hover:bg-[#1d202c] border border-[#252838] text-xs font-medium text-gray-200 transition-all cursor-pointer active:scale-95"
-            >
-              <span>❤️</span>
-              <span>8</span>
-            </button>
-
-            <button
-              onClick={() => addReaction('😂')}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#151720] hover:bg-[#1d202c] border border-[#252838] text-xs font-medium text-gray-200 transition-all cursor-pointer active:scale-95"
-            >
-              <span>😂</span>
-              <span>4</span>
-            </button>
-
-            <button
-              onClick={() => addReaction('😮')}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#151720] hover:bg-[#1d202c] border border-[#252838] text-xs font-medium text-gray-200 transition-all cursor-pointer active:scale-95"
-            >
-              <span>😮</span>
-              <span>2</span>
-            </button>
-
-            <button
-              onClick={() => addReaction('😢')}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#151720] hover:bg-[#1d202c] border border-[#252838] text-xs font-medium text-gray-200 transition-all cursor-pointer active:scale-95"
-            >
-              <span>😢</span>
-              <span>1</span>
-            </button>
-
-            <button
-              className="p-1 rounded-full text-gray-400 hover:text-white transition-colors cursor-pointer"
-              title="Tambah Reaksi"
-            >
-              <Smile className="w-4 h-4" />
-            </button>
-          </div>
-
+          <ReactionPicker layout="inline" />
           <div className="text-xs text-gray-500 italic">Rasakan bareng. Reaksiin bareng.</div>
         </div>
 
-        {/* 6. Participant Cards Section ("Satu layar, enam cerita") */}
+        {/* 6. LiveKit Video Chat & Participant Tiles */}
         <div className="space-y-2.5 pt-0.5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-white">Satu layar, enam cerita</h3>
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold text-white">
+              Satu layar, {connectedParticipants.length} peserta
+            </h3>
 
-            {/* Media Toggles */}
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <button
-                onClick={() => setIsMicActive(!isMicActive)}
-                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer border ${
-                  isMicActive
-                    ? 'bg-[#151720] text-white border-[#252838]'
-                    : 'bg-rose-500/10 text-rose-300 border-rose-500/30'
-                }`}
-              >
-                {isMicActive ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
-                <span className="hidden sm:inline">{isMicActive ? 'Mikrofon aktif' : 'Mikrofon mati'}</span>
-                <span className="sm:hidden">{isMicActive ? 'Mic' : 'Mute'}</span>
-              </button>
-
-              <button
-                onClick={() => setIsCameraActive(!isCameraActive)}
-                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer border ${
-                  isCameraActive
-                    ? 'bg-purple-600 text-white border-purple-500'
-                    : 'bg-[#151720] text-gray-300 border-[#252838]'
-                }`}
-              >
-                <VideoOff className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{isCameraActive ? 'Kamera aktif' : 'Kamera mati'}</span>
-                <span className="sm:hidden">{isCameraActive ? 'Kamera' : 'Off'}</span>
-              </button>
-            </div>
+            <MediaControls variant="inline" />
           </div>
 
-          {/* 6 Participant Tiles in One Row (Avatar on LEFT, text on RIGHT) */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 sm:gap-2.5">
-            {/* 1. Raka (Host) */}
-            <div className="p-3 rounded-2xl bg-[#14161f] border border-[#202432] flex items-center gap-2.5 min-w-0">
-              <span className="w-7 h-7 rounded-full bg-[#d97757] text-white font-bold text-xs flex items-center justify-center shrink-0">
-                RA
-              </span>
-              <div className="min-w-0 leading-tight">
-                <div className="text-xs font-semibold text-white truncate">Raka</div>
-                <div className="flex items-center gap-1 text-[10px] text-amber-400 font-medium mt-0.5">
-                  <Crown className="w-2.5 h-2.5" />
-                  <span>Host</span>
-                </div>
-              </div>
-            </div>
-
-            {/* 2. Dinda (Berbicara) */}
-            <div className="p-3 rounded-2xl bg-[#14161f] border border-emerald-500/30 ring-1 ring-emerald-500/20 flex items-center gap-2.5 min-w-0">
-              <span className="w-7 h-7 rounded-full bg-[#208b7e] text-white font-bold text-xs flex items-center justify-center shrink-0">
-                DI
-              </span>
-              <div className="min-w-0 leading-tight">
-                <div className="text-xs font-semibold text-white truncate">Dinda</div>
-                <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 font-medium mt-0.5">
-                  <SoundWaveIcon className="w-2.5 h-2.5" />
-                  <span>Berbicara</span>
-                </div>
-              </div>
-            </div>
-
-            {/* 3. Bimo (Menyimak) */}
-            <div className="p-3 rounded-2xl bg-[#14161f] border border-[#202432] flex items-center gap-2.5 min-w-0">
-              <span className="w-7 h-7 rounded-full bg-[#4a58b8] text-white font-bold text-xs flex items-center justify-center shrink-0">
-                BI
-              </span>
-              <div className="min-w-0 leading-tight">
-                <div className="text-xs font-semibold text-white truncate">Bimo</div>
-                <div className="text-[10px] text-gray-500 mt-0.5 flex items-center gap-1">
-                  <MicOff className="w-2.5 h-2.5" />
-                  <span>Menyimak</span>
-                </div>
-              </div>
-            </div>
-
-            {/* 4. Alya (Menyimak) */}
-            <div className="p-3 rounded-2xl bg-[#14161f] border border-[#202432] flex items-center gap-2.5 min-w-0">
-              <span className="w-7 h-7 rounded-full bg-[#d69046] text-white font-bold text-xs flex items-center justify-center shrink-0">
-                AL
-              </span>
-              <div className="min-w-0 leading-tight">
-                <div className="text-xs font-semibold text-white truncate">Alya</div>
-                <div className="text-[10px] text-gray-500 mt-0.5 flex items-center gap-1">
-                  <MicOff className="w-2.5 h-2.5" />
-                  <span>Menyimak</span>
-                </div>
-              </div>
-            </div>
-
-            {/* 5. Fajar (Syncing) */}
-            <div className="p-3 rounded-2xl bg-[#14161f] border border-amber-500/30 ring-1 ring-amber-500/20 flex items-center gap-2.5 min-w-0">
-              <span className="w-7 h-7 rounded-full bg-[#414856] text-white font-bold text-xs flex items-center justify-center shrink-0">
-                FA
-              </span>
-              <div className="min-w-0 leading-tight">
-                <div className="text-xs font-semibold text-white truncate">Fajar</div>
-                <div className="flex items-center gap-1 text-[10px] text-amber-400 font-medium mt-0.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                  <span>Syncing</span>
-                </div>
-              </div>
-            </div>
-
-            {/* 6. Naya (kamu - Terhubung) */}
-            <div className="p-3 rounded-2xl bg-[#14161f] border border-gray-700/60 flex items-center gap-2.5 min-w-0">
-              <span className="w-7 h-7 rounded-full bg-[#2a2d39] text-white font-bold text-xs flex items-center justify-center shrink-0 border border-gray-600">
-                NA
-              </span>
-              <div className="min-w-0 leading-tight">
-                <div className="text-xs font-semibold text-white truncate">Naya (kamu)</div>
-                <div className="flex items-center gap-1 text-[10px] text-emerald-400 font-medium mt-0.5">
-                  <Check className="w-2.5 h-2.5" />
-                  <span>Terhubung</span>
-                </div>
-              </div>
-            </div>
-          </div>
+          <VideoGrid />
         </div>
 
         {/* 7. Bottom Sync Bar */}
@@ -418,27 +232,6 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
           </div>
         </div>
       </div>
-
-      <style>{`
-        @keyframes floatUp {
-          0% {
-            opacity: 0;
-            transform: translateY(20px) scale(0.7);
-          }
-          20% {
-            opacity: 1;
-            transform: translateY(0) scale(1.1);
-          }
-          80% {
-            opacity: 0.9;
-            transform: translateY(-80px) scale(1);
-          }
-          100% {
-            opacity: 0;
-            transform: translateY(-130px) scale(0.8);
-          }
-        }
-      `}</style>
     </main>
   )
 }

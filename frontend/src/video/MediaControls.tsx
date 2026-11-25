@@ -4,15 +4,19 @@ import { useLiveKitStore } from '../state/useLiveKitStore'
 
 interface MediaControlsProps {
   onToggleReactionPicker?: () => void
+  variant?: 'floating' | 'inline'
 }
 
-export const MediaControls: React.FC<MediaControlsProps> = ({ onToggleReactionPicker }) => {
+export const MediaControls: React.FC<MediaControlsProps> = ({
+  onToggleReactionPicker,
+  variant = 'floating',
+}) => {
   const { isConnected, isCameraEnabled, isMicEnabled, toggleCamera, toggleMicrophone } =
     useLiveKitStore()
   const [busy, setBusy] = useState(false)
 
   const handleCamera = async () => {
-    if (busy) return
+    if (busy || !isConnected) return
     setBusy(true)
     try {
       await toggleCamera()
@@ -22,13 +26,54 @@ export const MediaControls: React.FC<MediaControlsProps> = ({ onToggleReactionPi
   }
 
   const handleMic = async () => {
-    if (busy) return
+    if (busy || !isConnected) return
     setBusy(true)
     try {
       await toggleMicrophone()
     } finally {
       setBusy(false)
     }
+  }
+
+  if (variant === 'inline') {
+    const disabledTitle = 'Video chat belum tersambung'
+    return (
+      <div className="flex items-center gap-1.5 sm:gap-2">
+        <button
+          onClick={handleMic}
+          disabled={!isConnected || busy}
+          className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs font-medium transition-all border ${
+            !isConnected
+              ? 'bg-[#151720] text-gray-500 border-[#252838] opacity-60 cursor-not-allowed'
+              : isMicEnabled
+                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 cursor-pointer'
+                : 'bg-rose-500/10 text-rose-300 border-rose-500/30 cursor-pointer'
+          }`}
+          title={!isConnected ? disabledTitle : isMicEnabled ? 'Mute Mikrofon' : 'Nyalakan Mikrofon'}
+        >
+          {isMicEnabled ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
+          <span className="hidden sm:inline">{isMicEnabled ? 'Mikrofon aktif' : 'Mikrofon mati'}</span>
+          <span className="sm:hidden">{isMicEnabled ? 'Mic' : 'Mute'}</span>
+        </button>
+
+        <button
+          onClick={handleCamera}
+          disabled={!isConnected || busy}
+          className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs font-medium transition-all border ${
+            !isConnected
+              ? 'bg-[#151720] text-gray-500 border-[#252838] opacity-60 cursor-not-allowed'
+              : isCameraEnabled
+                ? 'bg-purple-600 text-white border-purple-500 cursor-pointer'
+                : 'bg-[#151720] text-gray-300 border-[#252838] hover:border-gray-600 cursor-pointer'
+          }`}
+          title={!isConnected ? disabledTitle : isCameraEnabled ? 'Matikan Kamera' : 'Nyalakan Kamera'}
+        >
+          {isCameraEnabled ? <Camera className="w-3.5 h-3.5" /> : <CameraOff className="w-3.5 h-3.5" />}
+          <span className="hidden sm:inline">{isCameraEnabled ? 'Kamera aktif' : 'Kamera mati'}</span>
+          <span className="sm:hidden">{isCameraEnabled ? 'Kamera' : 'Off'}</span>
+        </button>
+      </div>
+    )
   }
 
   return (
