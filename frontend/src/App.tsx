@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { LeftSidebar } from './components/LeftSidebar'
+import { ChatSidebar } from './chat/ChatSidebar'
 import { CenterTheater } from './components/CenterTheater'
-import { RightSidebar } from './components/RightSidebar'
 import { CreateRoomModal } from './components/CreateRoomModal'
 import { JoinRoomModal } from './components/JoinRoomModal'
+import { LeftSidebar } from './components/LeftSidebar'
+import { kickRoomParticipant, startSession, toggleParticipantController } from './session/session'
 import { useRoomSession } from './session/useRoomSession'
-import { startSession } from './session/session'
-import type { RoomSummary } from './types'
+import type { Role, RoomSummary } from './types'
 
 export function App() {
   useRoomSession()
@@ -23,6 +23,11 @@ export function App() {
   const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(false)
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false)
 
+  const showToast = useCallback((message: string, durationMs = 3000) => {
+    setToastMessage(message)
+    setTimeout(() => setToastMessage(null), durationMs)
+  }, [])
+
   // Parse Cognito ID token from URL hash if redirected back from Hosted UI
   useEffect(() => {
     if (window.location.hash.includes('id_token=')) {
@@ -32,8 +37,7 @@ export function App() {
         sessionStorage.setItem('cognito_id_token', idToken)
         window.history.replaceState(null, '', window.location.pathname)
         setTimeout(() => {
-          setToastMessage('Berhasil login sebagai Host!')
-          setTimeout(() => setToastMessage(null), 3000)
+          showToast('Berhasil login sebagai Host!')
         }, 0)
       }
     }
@@ -47,15 +51,14 @@ export function App() {
         setIsJoinRoomOpen(true)
       }, 0)
     }
-  }, [])
+  }, [showToast])
 
   const handleInvite = () => {
     const inviteUrl =
       currentInviteUrl ||
       `${window.location.origin}/r/${activeRoomId === 'malam-minggu' ? '8J3GuXNOz0at' : activeRoomId}`
     navigator.clipboard.writeText(inviteUrl)
-    setToastMessage('Link undangan tersalin ke clipboard!')
-    setTimeout(() => setToastMessage(null), 2500)
+    showToast('Link undangan tersalin ke clipboard!', 2500)
   }
 
   const handleOpenCreateRoom = () => {
@@ -71,8 +74,7 @@ export function App() {
       mockRole: 'host',
     })
     navigator.clipboard.writeText(inviteUrl)
-    setToastMessage(`Ruang "${room.mediaTitle}" dibuat! Link tersalin ke clipboard.`)
-    setTimeout(() => setToastMessage(null), 3500)
+    showToast(`Ruang "${room.mediaTitle}" dibuat! Link tersalin ke clipboard.`, 3500)
   }
 
   const handleJoinRoom = (roomId: string, displayName: string) => {
@@ -82,8 +84,29 @@ export function App() {
       roomId,
       displayName,
     })
-    setToastMessage('Bergabung ke ruang nonton!')
-    setTimeout(() => setToastMessage(null), 2500)
+    showToast('Bergabung ke ruang nonton!', 2500)
+  }
+
+  const handleToggleController = async (participantId: string, currentRole: Role) => {
+    try {
+      const updated = await toggleParticipantController(participantId, currentRole)
+      showToast(
+        updated.role === 'controller'
+          ? `${updated.displayName} sekarang menjadi Controller.`
+          : `Izin Controller ${updated.displayName} dicabut.`,
+      )
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Gagal mengubah peran peserta.')
+    }
+  }
+
+  const handleKickParticipant = async (participantId: string) => {
+    try {
+      await kickRoomParticipant(participantId)
+      showToast('Peserta dikeluarkan dari ruang.')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Gagal mengeluarkan peserta.')
+    }
   }
 
   const closeLeftSidebar = useCallback(() => setIsLeftSidebarOpen(false), [])
@@ -169,7 +192,10 @@ export function App() {
 
       {/* ===== Right Sidebar — always visible on xl+, drawer below xl ===== */}
       <div className="hidden xl:flex">
-        <RightSidebar />
+        <ChatSidebar
+          onToggleController={handleToggleController}
+          onKickParticipant={handleKickParticipant}
+        />
       </div>
       {/* Mobile/Tablet: slide-over drawer from right */}
       {isRightSidebarOpen && (
@@ -180,7 +206,11 @@ export function App() {
             aria-label="Tutup obrolan"
           />
           <div className="relative h-full z-10 animate-slide-in-right">
-            <RightSidebar onClose={closeRightSidebar} />
+            <ChatSidebar
+              onClose={closeRightSidebar}
+              onToggleController={handleToggleController}
+              onKickParticipant={handleKickParticipant}
+            />
           </div>
         </div>
       )}
