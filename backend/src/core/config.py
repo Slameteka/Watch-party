@@ -62,4 +62,5 @@ LIVEKIT_URL: str = getenv("LIVEKIT_URL", RTC_URL)
 # using the *_NAME environment variables set by Terraform.
 
 COGNITO_USER_POOL_ID: str = getenv("COGNITO_USER_POOL_ID", "")
-COGNITO_CLIENT_ID: str = getenv("COGNITO_CLIENT_ID", "")
+COGNITO_CLIENT_ID: str = getenv("COGNITO_APP_CLIENT_ID") or getenv("COGNITO_CLIENT_ID", "")
+WS_MANAGEMENT_ENDPOINT: str = getenv("WS_MANAGEMENT_ENDPOINT", "")
