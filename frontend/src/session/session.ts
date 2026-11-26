@@ -123,9 +123,17 @@ export interface StartSessionOptions {
   displayName: string
   /** Only the mock server reads this. The real backend gives host to the Cognito owner. */
   mockRole?: Role
+  /** Optional Cognito JWT so returning host reclaims the host role on join. */
+  cognitoToken?: string
+  /** Reuse Host RoomSession returned by POST /rooms without re-calling /join. */
+  initialSession?: RoomSession
 }
 
-/** Join the room over REST, ask for media cookies, then open the WebSocket. */
+export function getActiveRoomId(): string | null {
+  return ctx.session?.roomId ?? null
+}
+
+/** Join the room over REST (or reuse initialSession), ask for media cookies, then open WebSocket. */
 export async function startSession(options: StartSessionOptions): Promise<void> {
   stopSession()
   const mine = generation
@@ -133,11 +141,20 @@ export async function startSession(options: StartSessionOptions): Promise<void> 
   playback.setConnection('connecting')
 
   let session: RoomSession
-  try {
-    session = await joinRoom(options.roomId, options.displayName, options.mockRole)
-  } catch (error) {
-    if (mine === generation) failFromError(error)
-    return
+  if (options.initialSession) {
+    session = options.initialSession
+  } else {
+    try {
+      session = await joinRoom(
+        options.roomId,
+        options.displayName,
+        options.mockRole,
+        options.cognitoToken,
+      )
+    } catch (error) {
+      if (mine === generation) failFromError(error)
+      return
+    }
   }
   if (mine !== generation) return
   ctx.session = session

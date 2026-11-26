@@ -19,14 +19,20 @@ import { VideoGrid } from '../video/VideoGrid'
 import { LogoTv, RadioBroadcastIcon } from './Icons'
 
 interface CenterTheaterProps {
+  activeRoomId: string | null
   onInvite?: () => void
+  onCreateRoom?: () => void
+  onJoinByCode?: (roomIdOrUrl: string) => void
   onToggleLeftSidebar?: () => void
   onToggleRightSidebar?: () => void
   isRightSidebarOpen?: boolean
 }
 
 export const CenterTheater: React.FC<CenterTheaterProps> = ({
+  activeRoomId,
   onInvite,
+  onCreateRoom,
+  onJoinByCode,
   onToggleLeftSidebar,
   onToggleRightSidebar,
   isRightSidebarOpen = false,
@@ -40,20 +46,21 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
   const controllerBadgeInitial =
     controllers[0]?.displayName.trim().slice(0, 2).toUpperCase() || 'WP'
   const controllerSummary =
-    controllers.length > 0
-      ? `${controllers.map((c) => c.displayName).join(', ')} mengontrol pemutaran`
-      : 'Menunggu host…'
+    connection === 'idle'
+      ? 'Belum masuk ruang'
+      : controllers.length > 0
+        ? `${controllers.map((c) => c.displayName).join(', ')} mengontrol pemutaran`
+        : 'Menunggu host…'
 
   const movieTitle = media?.title ?? 'Watch Party'
   const isConnected = connection === 'connected'
   const isConnecting = connection === 'connecting' || connection === 'reconnecting'
 
   return (
-    <main className="flex-1 flex flex-col h-full bg-[#0c0d10] overflow-hidden select-none text-[#8e929d]">
+    <main className="flex-1 flex flex-col h-full bg-[#0c0d10] overflow-hidden text-[#8e929d]">
       {/* 1. Sub-header Breadcrumb Bar (Height 56px / h-14) */}
-      <div className="h-14 px-3 sm:px-6 flex items-center justify-between border-b border-[#1c1e26] shrink-0 gap-2">
+      <div className="h-14 px-3 sm:px-6 flex items-center justify-between border-b border-[#1c1e26] shrink-0 gap-2 select-none">
         <div className="flex items-center gap-2 min-w-0">
-          {/* Mobile & Tablet Navigation Drawer Toggle */}
           <button
             onClick={onToggleLeftSidebar}
             className="p-1.5 -ml-1 text-gray-400 hover:text-white rounded-lg hover:bg-white/5 xl:hidden cursor-pointer shrink-0"
@@ -64,10 +71,12 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
 
           <Clapperboard className="w-4 h-4 text-purple-400 shrink-0" />
           <span className="font-semibold text-white text-[13px] truncate">{movieTitle}</span>
-          <span className="hidden sm:flex items-center gap-1 text-[11px] text-gray-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/5 ml-1 shrink-0">
-            <Lock className="w-3 h-3 text-gray-400" />
-            Privat
-          </span>
+          {activeRoomId && (
+            <span className="hidden sm:flex items-center gap-1 text-[11px] text-gray-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/5 ml-1 shrink-0 font-mono">
+              <Lock className="w-3 h-3 text-gray-400" />
+              {activeRoomId}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
@@ -86,7 +95,7 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
                   ? 'bg-emerald-400 animate-pulse'
                   : isConnecting
                     ? 'bg-amber-400 animate-pulse'
-                    : 'bg-gray-400'
+                    : 'bg-gray-500'
               }`}
             />
             <span className="hidden md:inline">
@@ -96,13 +105,14 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
                   ? 'Menyambung ulang…'
                   : connection === 'connecting'
                     ? 'Menghubungkan…'
-                    : 'Menyiapkan…'}
+                    : 'Siap'}
             </span>
           </div>
 
           <button
             onClick={onInvite}
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-[#151720] hover:bg-[#1e212d] text-xs font-medium text-white border border-[#252838] transition-all cursor-pointer shadow-sm"
+            disabled={!activeRoomId}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-[#151720] hover:bg-[#1e212d] disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium text-white border border-[#252838] transition-all cursor-pointer shadow-sm"
           >
             <UserPlus className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Undang teman</span>
@@ -124,8 +134,9 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
           </button>
 
           <button
+            onClick={onCreateRoom}
             className="p-1 rounded-full text-gray-400 hover:text-white transition-colors cursor-pointer"
-            title="Opsi"
+            title="Buat Ruang Baru"
           >
             <MoreHorizontal className="w-4 h-4" />
           </button>
@@ -145,7 +156,7 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
             </p>
           </div>
 
-          <div className="self-start sm:self-auto flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#151720] border border-[#252838] text-xs">
+          <div className="self-start sm:self-auto flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#151720] border border-[#252838] text-xs select-none">
             <span className="w-4 h-4 rounded-full bg-[#d97757] text-white font-bold text-[8px] flex items-center justify-center shrink-0">
               {controllerBadgeInitial}
             </span>
@@ -157,8 +168,7 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
 
         {/* 3. The Video Player Screen */}
         <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-black border border-[#1e222e] shadow-2xl group">
-          {/* Real player: plays the room's movie and follows the room state (FE-Player). */}
-          <WatchPlayer />
+          <WatchPlayer onCreateRoom={onCreateRoom} onJoinByCode={onJoinByCode} />
 
           {/* Watermark Branding inside video */}
           <div className="absolute top-4 left-5 flex items-center gap-2 text-white/90 font-bold text-xs tracking-tight select-none pointer-events-none">
@@ -166,19 +176,20 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
             <span>watch party</span>
           </div>
 
-          <div className="absolute top-4 right-5 flex items-center gap-1.5 text-[11px] text-white/80 font-medium bg-black/40 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-white/10 pointer-events-none">
-            <RadioBroadcastIcon className="w-3.5 h-3.5 text-white mr-0.5" />
-            <span>{connectedParticipants.length} orang · satu momen</span>
-          </div>
+          {isConnected && (
+            <div className="absolute top-4 right-5 flex items-center gap-1.5 text-[11px] text-white/80 font-medium bg-black/40 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-white/10 pointer-events-none select-none">
+              <RadioBroadcastIcon className="w-3.5 h-3.5 text-white mr-0.5" />
+              <span>{connectedParticipants.length} orang · satu momen</span>
+            </div>
+          )}
 
-          {/* Floating Reactions overlay driven by WebSocket / useSocialStore */}
           <ReactionOverlay />
         </div>
 
         {/* 4. Film Metadata Row (Dynamic from usePlaybackStore) */}
         <div className="flex flex-col gap-1 pt-0.5">
           <h2 className="text-base md:text-lg font-bold text-white tracking-tight">
-            {media?.title ?? 'Menunggu film…'}
+            {media?.title ?? (connection === 'idle' ? 'Siap untuk menonton' : 'Menunggu film…')}
           </h2>
           {media ? (
             <>
@@ -196,14 +207,20 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
               )}
             </>
           ) : (
-            <p className="text-xs text-gray-500">Menghubungkan ke ruang nonton…</p>
+            <p className="text-xs text-gray-500">
+              {connection === 'idle'
+                ? 'Pilih "Buat Ruang Nonton" atau masukkan kode undangan teman untuk mulai menonton.'
+                : 'Menghubungkan ke ruang nonton…'}
+            </p>
           )}
         </div>
 
         {/* 5. Reactions Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 py-2 border-y border-[#181a22]">
           <ReactionPicker layout="inline" />
-          <div className="text-xs text-gray-500 italic">Rasakan bareng. Reaksiin bareng.</div>
+          <div className="text-xs text-gray-500 italic select-none">
+            Rasakan bareng. Reaksiin bareng.
+          </div>
         </div>
 
         {/* 6. LiveKit Video Chat & Participant Tiles */}
@@ -220,7 +237,7 @@ export const CenterTheater: React.FC<CenterTheaterProps> = ({
         </div>
 
         {/* 7. Bottom Sync Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-2 px-3.5 rounded-xl bg-[#12141c]/70 border border-[#1b1f2b] text-[11px] text-gray-400">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-2 px-3.5 rounded-xl bg-[#12141c]/70 border border-[#1b1f2b] text-[11px] text-gray-400 select-none">
           <div className="flex items-center gap-2">
             <Link2 className="w-3.5 h-3.5 text-gray-400 shrink-0" />
             <span>Pemutaran tersinkron untuk semua. Nggak ada yang ketinggalan cerita.</span>

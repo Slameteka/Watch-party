@@ -5,6 +5,7 @@ import { useLiveKitStore } from '../state/useLiveKitStore'
 import { useSocialStore } from '../state/useSocialStore'
 import type { MediaItem, Participant, PlaybackState, WsEnvelope } from '../types'
 import {
+  getActiveRoomId,
   handleServerMessage,
   kickRoomParticipant,
   reportPlayerStatus,
@@ -363,6 +364,98 @@ describe('session message router', () => {
     it('rejects role changes cleanly when no session is active', async () => {
       await expect(toggleParticipantController('p_guest', 'viewer')).rejects.toThrow('Belum terhubung')
       await expect(kickRoomParticipant('p_guest')).rejects.toThrow('Belum terhubung')
+    })
+
+    it('reuses initialSession directly without calling POST /join', async () => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.endsWith('/media-cookies')) return new Response(null, { status: 204 })
+        if (url.endsWith('/rtc-token')) {
+          return new Response(
+            JSON.stringify({
+              token: 'lk-jwt',
+              url: 'wss://rtc.example.test',
+              expiresAtMs: Date.now() + 600_000,
+            }),
+            { status: 200 },
+          )
+        }
+        return new Response(null, { status: 404 })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      const wsConnect = vi.spyOn(wsClient, 'connect').mockResolvedValue()
+      const lkConnect = vi.spyOn(useLiveKitStore.getState(), 'connect').mockResolvedValue()
+
+      await startSession({
+        roomId: 'RoomInit1234',
+        displayName: 'Host',
+        initialSession: {
+          roomId: 'RoomInit1234',
+          participantId: 'p_host',
+          displayName: 'Host',
+          role: 'host',
+          roomToken: 'created-host-jwt',
+          roomTokenExpiresAtMs: Date.now() + 10_000_000,
+          wsUrl: 'wss://ws.example.test',
+        },
+      })
+
+      const calledUrls = fetchMock.mock.calls.map(([input]) => String(input))
+      expect(calledUrls.some((u) => u.endsWith('/join'))).toBe(false)
+      expect(calledUrls.some((u) => u.endsWith('/rooms/RoomInit1234/media-cookies'))).toBe(true)
+      expect(wsConnect).toHaveBeenCalledWith(
+        'wss://ws.example.test',
+        'created-host-jwt',
+        expect.any(Object),
+      )
+      expect(getActiveRoomId()).toBe('RoomInit1234')
+
+      snapshot('host', 1)
+
+      await vi.waitFor(() => {
+        expect(lkConnect).toHaveBeenCalledWith('wss://rtc.example.test', 'lk-jwt')
+      })
+    })
+
+    it('sends cognitoToken on /join and tracks active roomId lifecycle', async () => {
+      expect(getActiveRoomId()).toBeNull()
+
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+        const url = String(input)
+        if (url.endsWith('/join')) {
+          return new Response(
+            JSON.stringify({
+              roomId: 'RoomCognito1',
+              participantId: 'p_host',
+              displayName: 'Host Returning',
+              role: 'host',
+              roomToken: 'reclaimed-host-jwt',
+              roomTokenExpiresAtMs: Date.now() + 10_000_000,
+              wsUrl: 'wss://ws.example.test',
+            }),
+            { status: 200 },
+          )
+        }
+        if (url.endsWith('/media-cookies')) return new Response(null, { status: 204 })
+        return new Response(null, { status: 404 })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      vi.spyOn(wsClient, 'connect').mockResolvedValue()
+
+      await startSession({
+        roomId: 'RoomCognito1',
+        displayName: 'Host Returning',
+        cognitoToken: 'cognito-id-token-abc',
+      })
+
+      const joinCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/join'))
+      expect(joinCall).toBeDefined()
+      const headers = new Headers((joinCall![1] as RequestInit | undefined)?.headers)
+      expect(headers.get('authorization')).toBe('Bearer cognito-id-token-abc')
+      expect(getActiveRoomId()).toBe('RoomCognito1')
+
+      stopSession()
+      expect(getActiveRoomId()).toBeNull()
     })
   })
 })

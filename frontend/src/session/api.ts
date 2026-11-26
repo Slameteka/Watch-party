@@ -62,18 +62,23 @@ async function request(path: string, init: RequestInit): Promise<Response> {
 }
 
 /**
- * Join a room as guest (or host when `role` is set; role is read by the mock server only,
- * the real backend ignores unknown query parameters).
+ * Join a room as guest (or returning host when `cognitoToken` is provided).
+ * `mockRole` is read by the mock server only; the real backend ignores unknown query parameters.
  */
 export async function joinRoom(
   roomId: string,
   displayName: string,
   mockRole?: Role,
+  cognitoToken?: string,
 ): Promise<RoomSession> {
   const query = mockRole ? `?role=${encodeURIComponent(mockRole)}` : ''
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  if (cognitoToken) {
+    headers.authorization = `Bearer ${cognitoToken}`
+  }
   const response = await request(`/rooms/${encodeURIComponent(roomId)}/join${query}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers,
     body: JSON.stringify({ displayName }),
   })
   return (await response.json()) as RoomSession
