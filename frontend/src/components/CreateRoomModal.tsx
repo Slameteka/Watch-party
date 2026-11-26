@@ -1,12 +1,30 @@
 import React, { useEffect, useState } from 'react'
-import { AlertCircle, Check, Film, Loader2, Sparkles, Users, X } from 'lucide-react'
+import {
+  AlertCircle,
+  Check,
+  Film,
+  Loader2,
+  LogIn,
+  LogOut,
+  ShieldCheck,
+  Sparkles,
+  Users,
+  X,
+} from 'lucide-react'
 import { createRoom, getCatalog } from '../session/api'
-import type { MediaItem, RoomSummary } from '../types'
+import {
+  clearCognitoSession,
+  getCognitoProfile,
+  getStoredCognitoIdToken,
+  isCognitoConfigured,
+  startCognitoLogin,
+} from '../session/auth'
+import type { CreateRoomResponse, MediaItem } from '../types'
 
 interface CreateRoomModalProps {
   isOpen: boolean
   onClose: () => void
-  onRoomCreated: (room: RoomSummary, inviteUrl: string) => void
+  onRoomCreated: (created: CreateRoomResponse, inviteUrl: string) => void
 }
 
 const FALLBACK_CATALOG: MediaItem[] = [
@@ -27,16 +45,19 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
   onClose,
   onRoomCreated,
 }) => {
+  const cognitoReady = isCognitoConfigured()
   const [catalog, setCatalog] = useState<MediaItem[]>(FALLBACK_CATALOG)
   const [selectedMediaId, setSelectedMediaId] = useState<string>('sintel')
   const [displayName, setDisplayName] = useState<string>('Host')
   const [maxParticipants, setMaxParticipants] = useState<number>(6)
-  const [idToken, setIdToken] = useState<string>(() => sessionStorage.getItem('cognito_id_token') ?? '')
+  const [manualToken, setManualToken] = useState<string>(() => getStoredCognitoIdToken() ?? '')
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => Boolean(getStoredCognitoIdToken()))
   const [isLoadingCatalog, setIsLoadingCatalog] = useState<boolean>(false)
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  // Load catalog when modal opens
+  const profile = isLoggedIn ? getCognitoProfile() : null
+
   useEffect(() => {
     if (!isOpen) return
 
@@ -63,20 +84,22 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
 
   if (!isOpen) return null
 
-  const handleCognitoLogin = () => {
-    const domain = import.meta.env.VITE_COGNITO_DOMAIN as string | undefined
-    const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID as string | undefined
+  const activeToken = getStoredCognitoIdToken() || manualToken.trim()
+  const canCreateWithAuth = cognitoReady ? Boolean(activeToken) : true
 
-    if (!domain || !clientId) {
-      setErrorMessage(
-        'Konfigurasi Cognito belum diset di environment (VITE_COGNITO_DOMAIN & VITE_COGNITO_CLIENT_ID). Masukkan token manual untuk pengujian.'
-      )
-      return
+  const handleCognitoLogin = async () => {
+    setErrorMessage(null)
+    try {
+      await startCognitoLogin({ openCreateAfter: true })
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Gagal memulai login Cognito.')
     }
+  }
 
-    const redirectUri = encodeURIComponent(window.location.origin)
-    const loginUrl = `https://${domain}/login?client_id=${clientId}&response_type=token&scope=openid+email&redirect_uri=${redirectUri}`
-    window.location.href = loginUrl
+  const handleClearLogin = () => {
+    clearCognitoSession()
+    setManualToken('')
+    setIsLoggedIn(false)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -89,8 +112,12 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
       return
     }
 
-    // Use entered token, saved token, or mock token in dev
-    const tokenToUse = idToken.trim() || sessionStorage.getItem('cognito_id_token') || 'dev-mock-host-token'
+    if (cognitoReady && !activeToken) {
+      setErrorMessage('Silakan login sebagai Host lewat Cognito terlebih dahulu.')
+      return
+    }
+
+    const tokenToUse = activeToken || 'dev-mock-host-token'
 
     setIsSubmitting(true)
     try {
@@ -100,13 +127,9 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
         maxParticipants,
       })
 
-      // Remember token if provided
-      if (idToken.trim()) {
-        sessionStorage.setItem('cognito_id_token', idToken.trim())
-      }
-
-      const inviteUrl = response.room.inviteUrl || `${window.location.origin}/r/${response.room.roomId}`
-      onRoomCreated(response.room, inviteUrl)
+      const inviteUrl =
+        response.room.inviteUrl || `${window.location.origin}/r/${response.room.roomId}`
+      onRoomCreated(response, inviteUrl)
       onClose()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Gagal membuat ruang baru.'
@@ -127,7 +150,9 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm font-bold text-white leading-tight">Buat Ruang Nonton Baru</h2>
-              <p className="text-[11px] text-gray-400">Pilih film dari katalog dan tentukan kapasitas ruang</p>
+              <p className="text-[11px] text-gray-400">
+                Pilih film dari katalog dan tentukan kapasitas ruang
+              </p>
             </div>
           </div>
 
@@ -149,7 +174,68 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
             </div>
           )}
 
-          {/* 1. Film Selector */}
+          {/* 1. Host Cognito Authentication Status */}
+          <div className="p-3.5 rounded-xl bg-[#161822] border border-[#232737] space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <ShieldCheck
+                  className={`w-4 h-4 ${activeToken ? 'text-emerald-400' : 'text-amber-400'}`}
+                />
+                <span className="font-semibold text-white">Autentikasi Host (Cognito)</span>
+              </div>
+              {activeToken ? (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-medium">
+                  Sudah Login
+                </span>
+              ) : (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-medium">
+                  Wajib untuk Host
+                </span>
+              )}
+            </div>
+
+            {cognitoReady ? (
+              activeToken ? (
+                <div className="flex items-center justify-between gap-2 pt-1 text-[11px] text-gray-400">
+                  <span className="truncate">
+                    Akun: <strong className="text-gray-200">{profile?.email ?? 'Host Cognito'}</strong>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleClearLogin}
+                    className="flex items-center gap-1 text-rose-300 hover:text-rose-200 cursor-pointer shrink-0"
+                  >
+                    <LogOut className="w-3 h-3" />
+                    <span>Keluar</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2 pt-1">
+                  <p className="text-[11px] text-gray-400">
+                    Host perlu masuk atau mendaftar dengan akun Cognito sebelum membuat ruang nonton.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleCognitoLogin()}
+                    className="w-full py-2 px-3 rounded-xl bg-white text-black hover:bg-gray-200 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>Login / Daftar sebagai Host</span>
+                  </button>
+                </div>
+              )
+            ) : (
+              <input
+                type="password"
+                value={manualToken}
+                onChange={(e) => setManualToken(e.target.value)}
+                placeholder="Token dev opsional (mode lokal tanpa Cognito)"
+                className="w-full px-3 py-2 rounded-xl bg-[#11131b] border border-[#232737] text-white placeholder-gray-600 focus:outline-none focus:border-purple-500 text-[11px] font-mono"
+              />
+            )}
+          </div>
+
+          {/* 2. Film Selector */}
           <div className="space-y-2">
             <label className="font-semibold text-gray-200 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
@@ -181,7 +267,9 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="font-bold text-xs truncate text-white">{movie.title}</div>
-                        <div className="text-[10px] text-gray-400 mt-0.5">{durationMin} menit • HLS</div>
+                        <div className="text-[10px] text-gray-400 mt-0.5">
+                          {durationMin} menit • HLS
+                        </div>
                       </div>
                       {isSelected && (
                         <span className="w-4 h-4 rounded-full bg-purple-500 text-white flex items-center justify-center shrink-0">
@@ -201,18 +289,16 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
             </div>
           </div>
 
-          {/* 2. Display Name Input */}
+          {/* 3. Display Name Input */}
           <div className="space-y-1.5">
-            <label className="font-semibold text-gray-200 block">
-              Nama Tampilan Host (Anda)
-            </label>
+            <label className="font-semibold text-gray-200 block">Nama Tampilan Host (Anda)</label>
             <input
               type="text"
               required
               maxLength={32}
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Contoh: Raka, Alice"
+              placeholder="Contoh: Luqman, Alice"
               className="w-full px-3.5 py-2.5 rounded-xl bg-[#161822] border border-[#232737] text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 text-xs transition-all"
             />
             <div className="text-[10px] text-gray-500 flex justify-between">
@@ -221,7 +307,7 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
             </div>
           </div>
 
-          {/* 3. Max Participants Selector */}
+          {/* 4. Max Participants Selector */}
           <div className="space-y-1.5">
             <label className="font-semibold text-gray-200 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
@@ -240,31 +326,10 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
               className="w-full h-1.5 bg-[#222636] rounded-lg appearance-none cursor-pointer accent-purple-500"
             />
             <div className="flex justify-between text-[10px] text-gray-500">
-              <span>2 Orang (Private)</span>
+              <span>2 Orang (Privat)</span>
               <span>6 Orang (Rekomendasi)</span>
               <span>10 Orang (Maksimal)</span>
             </div>
-          </div>
-
-          {/* 4. Cognito Host Auth (Optional/Token helper) */}
-          <div className="pt-2 border-t border-[#1f2331] space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-[11px] text-gray-300">Autentikasi Host Cognito</span>
-              <button
-                type="button"
-                onClick={handleCognitoLogin}
-                className="text-[11px] text-purple-400 hover:text-purple-300 font-medium underline cursor-pointer"
-              >
-                Login via Hosted UI
-              </button>
-            </div>
-            <input
-              type="password"
-              value={idToken}
-              onChange={(e) => setIdToken(e.target.value)}
-              placeholder="Cognito ID Token (opsional di dev / mock)"
-              className="w-full px-3 py-2 rounded-xl bg-[#161822] border border-[#232737] text-white placeholder-gray-600 focus:outline-none focus:border-purple-500 text-[11px] font-mono"
-            />
           </div>
 
           {/* Action Buttons */}
@@ -280,8 +345,8 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
 
             <button
               type="submit"
-              disabled={isSubmitting || !displayName.trim()}
-              className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-xs font-semibold transition-all shadow-lg shadow-purple-600/30 flex items-center gap-2 cursor-pointer"
+              disabled={isSubmitting || !displayName.trim() || !canCreateWithAuth}
+              className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold transition-all shadow-lg shadow-purple-600/30 flex items-center gap-2 cursor-pointer"
             >
               {isSubmitting ? (
                 <>

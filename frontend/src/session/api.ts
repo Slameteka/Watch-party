@@ -5,8 +5,10 @@ import type {
   CreateRoomRequest,
   CreateRoomResponse,
   ErrorPayload,
+  Participant,
   Role,
   RoomSummary,
+  RtcTokenResponse,
 } from '../types'
 
 /** Response of POST /rooms/{roomId}/join and /session/refresh (schema RoomSession). */
@@ -60,18 +62,23 @@ async function request(path: string, init: RequestInit): Promise<Response> {
 }
 
 /**
- * Join a room as guest (or host when `role` is set; role is read by the mock server only,
- * the real backend ignores unknown query parameters).
+ * Join a room as guest (or returning host when `cognitoToken` is provided).
+ * `mockRole` is read by the mock server only; the real backend ignores unknown query parameters.
  */
 export async function joinRoom(
   roomId: string,
   displayName: string,
   mockRole?: Role,
+  cognitoToken?: string,
 ): Promise<RoomSession> {
   const query = mockRole ? `?role=${encodeURIComponent(mockRole)}` : ''
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  if (cognitoToken) {
+    headers.authorization = `Bearer ${cognitoToken}`
+  }
   const response = await request(`/rooms/${encodeURIComponent(roomId)}/join${query}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers,
     body: JSON.stringify({ displayName }),
   })
   return (await response.json()) as RoomSession
@@ -135,4 +142,71 @@ export async function createRoom(
     body: JSON.stringify(payload),
   })
   return (await response.json()) as CreateRoomResponse
+}
+
+/**
+ * Request a short-lived LiveKit access token for room video chat (F-3.1, ADR-0004).
+ */
+export async function requestRtcToken(
+  roomId: string,
+  roomToken: string,
+): Promise<RtcTokenResponse> {
+  const response = await request(`/rooms/${encodeURIComponent(roomId)}/rtc-token`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${roomToken}` },
+  })
+  return (await response.json()) as RtcTokenResponse
+}
+
+/**
+ * Grant playback controller permission to a participant (F-2.2). Host only.
+ */
+export async function grantController(
+  roomId: string,
+  participantId: string,
+  roomToken: string,
+): Promise<Participant> {
+  const response = await request(
+    `/rooms/${encodeURIComponent(roomId)}/controllers/${encodeURIComponent(participantId)}`,
+    {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${roomToken}` },
+    },
+  )
+  return (await response.json()) as Participant
+}
+
+/**
+ * Revoke playback controller permission from a participant (F-2.2). Host only.
+ */
+export async function revokeController(
+  roomId: string,
+  participantId: string,
+  roomToken: string,
+): Promise<Participant> {
+  const response = await request(
+    `/rooms/${encodeURIComponent(roomId)}/controllers/${encodeURIComponent(participantId)}`,
+    {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${roomToken}` },
+    },
+  )
+  return (await response.json()) as Participant
+}
+
+/**
+ * Remove (kick) a participant from the room (F-1.6). Host only.
+ */
+export async function kickParticipant(
+  roomId: string,
+  participantId: string,
+  roomToken: string,
+): Promise<void> {
+  await request(
+    `/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}`,
+    {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${roomToken}` },
+    },
+  )
 }

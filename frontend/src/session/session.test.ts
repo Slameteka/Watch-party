@@ -1,9 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { usePlaybackStore } from '../player/usePlaybackStore'
 import { wsClient } from '../services/websocket'
+import { useLiveKitStore } from '../state/useLiveKitStore'
 import { useSocialStore } from '../state/useSocialStore'
 import type { MediaItem, Participant, PlaybackState, WsEnvelope } from '../types'
-import { handleServerMessage, reportPlayerStatus, sendPlaybackCommand, stopSession } from './session'
+import {
+  getActiveRoomId,
+  handleServerMessage,
+  kickRoomParticipant,
+  reportPlayerStatus,
+  sendPlaybackCommand,
+  startSession,
+  stopSession,
+  toggleParticipantController,
+} from './session'
 
 const media: MediaItem = {
   mediaId: 'big-buck-bunny',
@@ -210,6 +220,242 @@ describe('session message router', () => {
       expect(sendPlaybackCommand('seek', 11)).toBe('rate-limited')
       vi.advanceTimersByTime(10_001)
       expect(sendPlaybackCommand('seek', 11)).toBe('sent')
+    })
+  })
+
+  describe('LiveKit lifecycle and role management', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('requests rtc-token and connects LiveKit on room.snapshot, then disconnects on session.ended', async () => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.endsWith('/join')) {
+          return new Response(
+            JSON.stringify({
+              roomId: 'Room12345678',
+              participantId: 'p_host',
+              displayName: 'Alice',
+              role: 'host',
+              roomToken: 'secret-room-jwt',
+              roomTokenExpiresAtMs: Date.now() + 10_000_000,
+              wsUrl: 'wss://ws.example.test',
+            }),
+            { status: 200 },
+          )
+        }
+        if (url.endsWith('/media-cookies')) {
+          return new Response(null, { status: 204 })
+        }
+        if (url.endsWith('/rtc-token')) {
+          return new Response(
+            JSON.stringify({
+              token: 'lk-jwt',
+              url: 'wss://rtc.example.test',
+              expiresAtMs: Date.now() + 600_000,
+            }),
+            { status: 200 },
+          )
+        }
+        return new Response(null, { status: 404 })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      vi.spyOn(wsClient, 'connect').mockResolvedValue()
+      const lkConnect = vi.spyOn(useLiveKitStore.getState(), 'connect').mockResolvedValue()
+      const lkDisconnect = vi.spyOn(useLiveKitStore.getState(), 'disconnect')
+
+      await startSession({ roomId: 'Room12345678', displayName: 'Alice' })
+      snapshot('host', 1)
+
+      await vi.waitFor(() => {
+        expect(lkConnect).toHaveBeenCalledWith('wss://rtc.example.test', 'lk-jwt')
+      })
+
+      handleServerMessage(message('session.ended', { reason: 'roomClosed' }))
+      expect(lkDisconnect).toHaveBeenCalled()
+    })
+
+    it('degrades gracefully when rtc-token fails without breaking playback session', async () => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.endsWith('/join')) {
+          return new Response(
+            JSON.stringify({
+              roomId: 'Room12345678',
+              participantId: 'p_viewer',
+              displayName: 'Bob',
+              role: 'viewer',
+              roomToken: 'viewer-jwt',
+              roomTokenExpiresAtMs: Date.now() + 10_000_000,
+              wsUrl: 'wss://ws.example.test',
+            }),
+            { status: 200 },
+          )
+        }
+        if (url.endsWith('/media-cookies')) return new Response(null, { status: 204 })
+        if (url.endsWith('/rtc-token')) {
+          return new Response(JSON.stringify({ error: { code: 'INTERNAL_ERROR', message: 'down' } }), {
+            status: 500,
+          })
+        }
+        return new Response(null, { status: 404 })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      vi.spyOn(wsClient, 'connect').mockResolvedValue()
+
+      await startSession({ roomId: 'Room12345678', displayName: 'Bob' })
+      snapshot('viewer', 1)
+
+      await vi.waitFor(() => {
+        expect(useLiveKitStore.getState().error).toBe('Video chat sedang tidak tersedia')
+      })
+      expect(usePlaybackStore.getState().connection).toBe('connected')
+    })
+
+    it('toggles controller and kicks participant using active session token', async () => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.endsWith('/join')) {
+          return new Response(
+            JSON.stringify({
+              roomId: 'Room12345678',
+              participantId: 'p_host',
+              displayName: 'Alice',
+              role: 'host',
+              roomToken: 'host-secret-jwt',
+              roomTokenExpiresAtMs: Date.now() + 10_000_000,
+              wsUrl: 'wss://ws.example.test',
+            }),
+            { status: 200 },
+          )
+        }
+        if (url.endsWith('/media-cookies')) return new Response(null, { status: 204 })
+        if (url.endsWith('/controllers/p_guest') && init?.method === 'PUT') {
+          return new Response(JSON.stringify(participant('p_guest', 'controller')), { status: 200 })
+        }
+        if (url.endsWith('/participants/p_guest') && init?.method === 'DELETE') {
+          return new Response(null, { status: 204 })
+        }
+        return new Response(null, { status: 404 })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      vi.spyOn(wsClient, 'connect').mockResolvedValue()
+
+      await startSession({ roomId: 'Room12345678', displayName: 'Alice' })
+      useSocialStore.setState({ participants: [participant('p_host', 'host'), participant('p_guest', 'viewer')] })
+
+      const updated = await toggleParticipantController('p_guest', 'viewer')
+      expect(updated.role).toBe('controller')
+      expect(useSocialStore.getState().participants.find((p) => p.participantId === 'p_guest')?.role).toBe(
+        'controller',
+      )
+
+      await kickRoomParticipant('p_guest')
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/rooms/Room12345678/participants/p_guest'),
+        expect.objectContaining({
+          method: 'DELETE',
+          headers: { authorization: 'Bearer host-secret-jwt' },
+        }),
+      )
+    })
+
+    it('rejects role changes cleanly when no session is active', async () => {
+      await expect(toggleParticipantController('p_guest', 'viewer')).rejects.toThrow('Belum terhubung')
+      await expect(kickRoomParticipant('p_guest')).rejects.toThrow('Belum terhubung')
+    })
+
+    it('reuses initialSession directly without calling POST /join', async () => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.endsWith('/media-cookies')) return new Response(null, { status: 204 })
+        if (url.endsWith('/rtc-token')) {
+          return new Response(
+            JSON.stringify({
+              token: 'lk-jwt',
+              url: 'wss://rtc.example.test',
+              expiresAtMs: Date.now() + 600_000,
+            }),
+            { status: 200 },
+          )
+        }
+        return new Response(null, { status: 404 })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      const wsConnect = vi.spyOn(wsClient, 'connect').mockResolvedValue()
+      const lkConnect = vi.spyOn(useLiveKitStore.getState(), 'connect').mockResolvedValue()
+
+      await startSession({
+        roomId: 'RoomInit1234',
+        displayName: 'Host',
+        initialSession: {
+          roomId: 'RoomInit1234',
+          participantId: 'p_host',
+          displayName: 'Host',
+          role: 'host',
+          roomToken: 'created-host-jwt',
+          roomTokenExpiresAtMs: Date.now() + 10_000_000,
+          wsUrl: 'wss://ws.example.test',
+        },
+      })
+
+      const calledUrls = fetchMock.mock.calls.map(([input]) => String(input))
+      expect(calledUrls.some((u) => u.endsWith('/join'))).toBe(false)
+      expect(calledUrls.some((u) => u.endsWith('/rooms/RoomInit1234/media-cookies'))).toBe(true)
+      expect(wsConnect).toHaveBeenCalledWith(
+        'wss://ws.example.test',
+        'created-host-jwt',
+        expect.any(Object),
+      )
+      expect(getActiveRoomId()).toBe('RoomInit1234')
+
+      snapshot('host', 1)
+
+      await vi.waitFor(() => {
+        expect(lkConnect).toHaveBeenCalledWith('wss://rtc.example.test', 'lk-jwt')
+      })
+    })
+
+    it('sends cognitoToken on /join and tracks active roomId lifecycle', async () => {
+      expect(getActiveRoomId()).toBeNull()
+
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+        const url = String(input)
+        if (url.endsWith('/join')) {
+          return new Response(
+            JSON.stringify({
+              roomId: 'RoomCognito1',
+              participantId: 'p_host',
+              displayName: 'Host Returning',
+              role: 'host',
+              roomToken: 'reclaimed-host-jwt',
+              roomTokenExpiresAtMs: Date.now() + 10_000_000,
+              wsUrl: 'wss://ws.example.test',
+            }),
+            { status: 200 },
+          )
+        }
+        if (url.endsWith('/media-cookies')) return new Response(null, { status: 204 })
+        return new Response(null, { status: 404 })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      vi.spyOn(wsClient, 'connect').mockResolvedValue()
+
+      await startSession({
+        roomId: 'RoomCognito1',
+        displayName: 'Host Returning',
+        cognitoToken: 'cognito-id-token-abc',
+      })
+
+      const joinCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/join'))
+      expect(joinCall).toBeDefined()
+      const headers = new Headers((joinCall![1] as RequestInit | undefined)?.headers)
+      expect(headers.get('authorization')).toBe('Bearer cognito-id-token-abc')
+      expect(getActiveRoomId()).toBe('RoomCognito1')
+
+      stopSession()
+      expect(getActiveRoomId()).toBeNull()
     })
   })
 })
